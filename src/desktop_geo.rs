@@ -76,6 +76,7 @@ impl MapView {
         ui: &mut egui::Ui,
         network: &Network,
         selected: Option<Id>,
+        results: Option<&calcelec::load_flow::LoadFlow>,
     ) -> Option<Id> {
         let mut fit = false;
         ui.horizontal(|ui| {
@@ -174,6 +175,16 @@ impl MapView {
                     Color32::from_rgb(245, 160, 85)
                 }
             };
+            let color = if Some(o.id) != selected
+                && results.is_some_and(|r| {
+                    r.branches
+                        .iter()
+                        .any(|b| b.id == o.id && b.loading_percent.is_some_and(|p| p > 100.0))
+                }) {
+                Color32::LIGHT_RED
+            } else {
+                color
+            };
             for segment in points.windows(2) {
                 painter.line_segment(
                     [segment[0], segment[1]],
@@ -207,6 +218,19 @@ impl MapView {
             } else {
                 Color32::from_rgb(95, 220, 190)
             };
+            let color = if Some(o.id) != selected
+                && results.is_some_and(|r| {
+                    r.buses
+                        .iter()
+                        .any(|b| b.id == o.id && b.outside_voltage_limits)
+                        || r.branches
+                            .iter()
+                            .any(|b| b.id == o.id && b.loading_percent.is_some_and(|p| p > 100.0))
+                }) {
+                Color32::LIGHT_RED
+            } else {
+                color
+            };
             if matches!(
                 o.equipment,
                 Equipment::Transformer { .. } | Equipment::Source { .. }
@@ -233,7 +257,24 @@ impl MapView {
         if !hits.is_empty() {
             let label = hits
                 .iter()
-                .map(|(_, id)| network.objects[id].name.as_str())
+                .map(|(_, id)| {
+                    let name = &network.objects[id].name;
+                    if let Some(bus) = results.and_then(|r| r.buses.iter().find(|b| b.id == *id)) {
+                        format!(
+                            "{name} · {:.2} V ({:.4} pu)",
+                            bus.voltage_ll_v, bus.voltage_pu
+                        )
+                    } else if let Some(branch) =
+                        results.and_then(|r| r.branches.iter().find(|b| b.id == *id))
+                    {
+                        format!(
+                            "{name} · {:.2} A amont / {:.2} A aval",
+                            branch.current_from_a, branch.current_to_a
+                        )
+                    } else {
+                        name.clone()
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             response.clone().on_hover_text(label);

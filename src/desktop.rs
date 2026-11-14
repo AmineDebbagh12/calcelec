@@ -1,5 +1,6 @@
 use crate::desktop_geo::MapView;
 use calcelec::geometry::{Coordinate, Geometry};
+use calcelec::load_flow::{self, Options, StudyResult};
 use calcelec::{
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
@@ -7,6 +8,16 @@ use calcelec::{
 };
 use eframe::egui::{self, Color32, Pos2, Stroke, Vec2};
 use std::collections::BTreeMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+
+struct CalculationTask {
+    receiver: mpsc::Receiver<load_flow::Result<StudyResult>>,
+    cancel: Arc<AtomicBool>,
+}
 
 pub struct Desktop {
     project: Project,
@@ -27,6 +38,11 @@ pub struct Desktop {
     database_projects: Vec<(Id, String)>,
     status: String,
     error: bool,
+    study: Option<StudyResult>,
+    calculation: Option<CalculationTask>,
+    simplified_calculation: bool,
+    results_view: bool,
+    result_path: String,
 }
 impl Desktop {
     pub fn new() -> Self {
@@ -51,6 +67,11 @@ impl Desktop {
             status: "Exemple synthétique chargé en mémoire. Enregistrez-le avant de quitter."
                 .into(),
             error: false,
+            study: None,
+            calculation: None,
+            simplified_calculation: false,
+            results_view: false,
+            result_path: "resultats.calcelec.json".into(),
         }
     }
     fn report(&mut self, result: Result<String>) {
@@ -69,6 +90,14 @@ impl Desktop {
     }
     fn refresh(&mut self) -> Result<()> {
         self.network = self.project.network()?;
+        if self.study.as_ref().is_some_and(|s| {
+            s.project_id != self.project.id || s.network_version != self.project.head()
+        }) {
+            self.study = None;
+        }
+        if let Some(task) = &self.calculation {
+            task.cancel.store(true, Ordering::Relaxed);
+        }
         if let Some(id) = self.selected {
             if self.network.objects.contains_key(&id) {
                 self.select(id);
@@ -120,6 +149,212 @@ impl Desktop {
         self.project.apply(change)?;
         self.refresh()?;
         Ok("Version créée en mémoire. Sauvegardez le projet ou la base pour la conserver.".into())
+    }
+    fn start_calculation(&mut self) {
+        if self.calculation.is_some() {
+            return;
+        }
+        let project = self.project.clone();
+        let options = if self.simplified_calculation {
+            Options::simplified()
+        } else {
+            Options::default()
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let (sender, receiver) = mpsc::channel();
+        self.study = None;
+        self.error = false;
+        self.status = "Calcul en cours sur la version enregistrée en mémoire ; les champs non validés sont exclus.".into();
+        self.calculation = Some(CalculationTask { receiver, cancel });
+        std::thread::spawn(move || {
+            let _ = sender.send(load_flow::study(&project, &options, &worker_cancel));
+        });
+    }
+    fn poll_calculation(&mut self) {
+        let Some(task) = &self.calculation else {
+            return;
+        };
+        let (result, was_cancelled) = match task.receiver.try_recv() {
+            Ok(result) => (result, task.cancel.load(Ordering::Relaxed)),
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.calculation = None;
+                self.error = true;
+                self.status = "Le moteur de calcul s'est interrompu.".into();
+                return;
+            }
+        };
+        self.calculation = None;
+        if was_cancelled {
+            self.error = false;
+            self.status = "Calcul annulé ou réseau modifié ; résultat écarté.".into();
+            return;
+        }
+        match result {
+            Ok(study)
+                if study.project_id == self.project.id
+                    && study.network_version == self.project.head() =>
+            {
+                self.status = format!(
+                    "Calcul convergé en {} itérations · résidu {:.2e} pu · pertes {:.3} kW",
+                    study.result.iterations,
+                    study.result.residual_pu,
+                    study.result.total_loss_w / 1000.0
+                );
+                self.error = false;
+                self.results_view = true;
+                self.study = Some(study);
+            }
+            Ok(_) => {
+                self.error = false;
+                self.status = "Résultat écarté : le projet ou sa version a changé.".into();
+            }
+            Err(error) => {
+                self.error = true;
+                self.status = error.to_string();
+            }
+        }
+    }
+    fn calculation_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.add_enabled_ui(self.calculation.is_none(),|ui| {
+                ui.checkbox(&mut self.simplified_calculation,"Autoriser les modèles simplifiés").on_hover_text("Répartit les puissances monophasées sur trois phases et assimile uk des transformateurs à une réactance, sans pertes actives ni déphasage.");
+                if ui.button("Calculer le régime permanent").clicked() {self.start_calculation();}
+            });
+            if let Some(task)=&self.calculation {
+                ui.spinner();
+                if ui.button("Annuler le calcul").clicked() {task.cancel.store(true,Ordering::Relaxed);}
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+            }
+        });
+        if self.simplified_calculation {
+            ui.small("Hypothèses : équivalents équilibrés des charges monophasées ; transformateurs purement réactifs, rapport nominal, sans déphasage. Aucun calcul du neutre.");
+        }
+    }
+    fn results_table(&mut self, ui: &mut egui::Ui) {
+        let Some(study) = &self.study else {
+            ui.label("Aucun résultat pour cette version. Lancez un calcul ; l'exemple rural nécessite les modèles simplifiés.");
+            return;
+        };
+        let r = &study.result;
+        ui.label(format!(
+            "Source : {:.3} kW / {:.3} kvar · Demande nette : {:.3} kW · Pertes : {:.3} kW",
+            r.source_p_w / 1000.0,
+            r.source_q_var / 1000.0,
+            r.net_demand_p_w / 1000.0,
+            r.total_loss_w / 1000.0
+        ));
+        ui.small(format!(
+            "{} itérations · résidu {:.2e} pu · erreur de bilan {:.3e} VA",
+            r.iterations, r.residual_pu, r.balance_error_va
+        ));
+        ui.collapsing("Hypothèses et traçabilité du résultat", |ui| {
+            ui.label(format!("Version réseau : {}", study.network_version));
+            ui.label(format!(
+                "Moteur : {} · tolérance {:.1e} pu",
+                study.solver_version, study.options.tolerance_pu
+            ));
+            for assumption in &r.assumptions {
+                ui.label(assumption);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(&mut self.result_path);
+            if ui.button("Exporter les résultats JSON").clicked() {
+                let result = serde_json::to_string(study)
+                    .map_err(Into::into)
+                    .and_then(|json| storage::export_new(&self.result_path, &json));
+                self.error = result.is_err();
+                self.status = match result {
+                    Ok(()) => "Résultats exportés avec version, options et hypothèses.".into(),
+                    Err(e) => e.to_string(),
+                };
+            }
+        });
+        let mut clicked = None;
+        ui.strong("Tensions composées — équivalent équilibré");
+        egui::Grid::new("bus_results").striped(true).show(ui, |ui| {
+            for title in ["Jeu de barres", "U (V)", "U (pu)", "Angle (°)", "État"] {
+                ui.strong(title);
+            }
+            ui.end_row();
+            let mut buses: Vec<_> = r.buses.iter().collect();
+            buses.sort_by_key(|b| &self.network.objects[&b.id].name);
+            for b in buses {
+                if ui
+                    .selectable_label(
+                        self.selected == Some(b.id),
+                        &self.network.objects[&b.id].name,
+                    )
+                    .clicked()
+                {
+                    clicked = Some(b.id);
+                }
+                ui.label(format!("{:.2}", b.voltage_ll_v));
+                ui.label(format!("{:.5}", b.voltage_pu));
+                ui.label(format!("{:.3}", b.angle_deg));
+                ui.colored_label(
+                    if b.outside_voltage_limits {
+                        Color32::LIGHT_RED
+                    } else {
+                        Color32::LIGHT_GREEN
+                    },
+                    if b.outside_voltage_limits {
+                        "Hors seuils"
+                    } else {
+                        "Dans les seuils"
+                    },
+                );
+                ui.end_row();
+            }
+        });
+        ui.separator();
+        ui.strong("Branches — sens de la source vers l'aval");
+        egui::Grid::new("branch_results")
+            .striped(true)
+            .show(ui, |ui| {
+                for title in [
+                    "Branche",
+                    "I amont (A)",
+                    "I aval (A)",
+                    "Charge (%)",
+                    "Pertes (W)",
+                ] {
+                    ui.strong(title);
+                }
+                ui.end_row();
+                let mut branches: Vec<_> = r.branches.iter().collect();
+                branches.sort_by_key(|b| &self.network.objects[&b.id].name);
+                for b in branches {
+                    if ui
+                        .selectable_label(
+                            self.selected == Some(b.id),
+                            &self.network.objects[&b.id].name,
+                        )
+                        .clicked()
+                    {
+                        clicked = Some(b.id);
+                    }
+                    ui.label(format!("{:.2}", b.current_from_a));
+                    ui.label(format!("{:.2}", b.current_to_a));
+                    ui.colored_label(
+                        if b.loading_percent.is_some_and(|p| p > 100.0) {
+                            Color32::LIGHT_RED
+                        } else {
+                            Color32::LIGHT_GREEN
+                        },
+                        b.loading_percent
+                            .map(|p| format!("{p:.1}"))
+                            .unwrap_or_else(|| "—".into()),
+                    );
+                    ui.label(format!("{:.2}", b.loss_w));
+                    ui.end_row();
+                }
+            });
+        if let Some(id) = clicked {
+            self.select(id);
+        }
     }
     fn files(&mut self, ui: &mut egui::Ui) {
         ui.heading("Projet et échanges");
@@ -474,6 +709,7 @@ impl Desktop {
 }
 impl Desktop {
     fn render(&mut self, ui: &mut egui::Ui) {
+        self.poll_calculation();
         egui::Panel::top("header").show(ui, |ui| {
             ui.heading("CalcElec / Distribution publique");
             ui.label(&self.network.name);
@@ -481,7 +717,8 @@ impl Desktop {
                 ui.label(format!("{} objets · {} versions enregistrées en mémoire",self.network.objects.len(),self.project.changes.len()+1));
                 ui.small(format!("Version {}",self.project.head()));
             });
-            ui.colored_label(Color32::from_rgb(230,180,75),"Prototype de modélisation et de partage — calculs électriques à venir. Données d'exemple synthétiques.");
+            ui.colored_label(Color32::from_rgb(230,180,75),"Prototype — calcul AC équilibré radial disponible ; déséquilibré et courts-circuits à venir. Données synthétiques.");
+            self.calculation_controls(ui);
         });
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.colored_label(
@@ -518,7 +755,12 @@ impl Desktop {
                 ui.selectable_value(&mut self.geographic, false, "Vue topologique");
             });
             if self.geographic {
-                if let Some(id) = self.map.show(ui, &self.network, self.selected) {
+                if let Some(id) = self.map.show(
+                    ui,
+                    &self.network,
+                    self.selected,
+                    self.study.as_ref().map(|s| &s.result),
+                ) {
                     self.select(id);
                 }
             } else {
@@ -529,8 +771,16 @@ impl Desktop {
                 self.network.unpowered_buses().len()
             ));
             ui.separator();
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.results_view, false, "Équipements");
+                ui.selectable_value(&mut self.results_view, true, "Résultats du calcul");
+            });
             let mut clicked = None;
             egui::ScrollArea::vertical().show(ui, |ui| {
+                if self.results_view {
+                    self.results_table(ui);
+                    return;
+                }
                 egui::Grid::new("objects")
                     .striped(true)
                     .min_col_width(90.0)
@@ -596,6 +846,15 @@ mod tests {
         app.p_kw = 12.5;
         app.record().unwrap();
         assert_eq!(app.network.objects[&id].power().unwrap().0, 12500.0);
+        app.study = Some(
+            load_flow::study(
+                &app.project,
+                &Options::simplified(),
+                &AtomicBool::new(false),
+            )
+            .unwrap(),
+        );
+        app.results_view = true;
         let context = egui::Context::default();
         let mut output = context.run_ui(
             egui::RawInput {
@@ -610,7 +869,50 @@ mod tests {
         assert!(!output.shapes.is_empty());
         output.textures_delta.clear();
         app.geographic = false;
+        app.results_view = false;
         let mut output = context.run_ui(egui::RawInput::default(), |ui| app.render(ui));
         output.textures_delta.clear();
+    }
+    fn deliver(app: &mut Desktop, report: StudyResult, cancelled: bool) {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Ok(report)).unwrap();
+        app.calculation = Some(CalculationTask {
+            receiver,
+            cancel: Arc::new(AtomicBool::new(cancelled)),
+        });
+        app.poll_calculation();
+    }
+    #[test]
+    fn results_are_invalidated_on_edit_and_late_results_are_discarded() {
+        let mut app = Desktop::new();
+        let report = load_flow::study(
+            &app.project,
+            &Options::simplified(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        deliver(&mut app, report.clone(), false);
+        assert!(app.study.is_some());
+        let id = *app.network.objects.keys().next().unwrap();
+        app.select(id);
+        app.name = "Nom modifié".into();
+        app.record().unwrap();
+        assert!(app.study.is_none());
+        deliver(&mut app, report, false);
+        assert!(app.study.is_none());
+    }
+    #[test]
+    fn cancellation_discards_even_a_completed_calculation() {
+        let mut app = Desktop::new();
+        let report = load_flow::study(
+            &app.project,
+            &Options::simplified(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        deliver(&mut app, report, true);
+        assert!(app.study.is_none());
+        assert!(app.calculation.is_none());
+        assert!(!app.error);
     }
 }

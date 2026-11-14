@@ -284,6 +284,13 @@ constitue pas encore une couverture complète des études de transport HTB.
 
 Ces jalons découpent la réalisation ; la V1 comprend leur ensemble.
 
+État d'implémentation : le prototype dispose du socle de versions, des géométries
+et d'un premier moteur équilibré radial. Ce dernier couvre une partie du jalon B,
+avec des simplifications explicitement optionnelles pour l'exemple rural.
+Les calculs maillés, déséquilibrés et de courts-circuits restent à développer.
+Voir la [spécification du premier moteur](calcul-regime-permanent.md) pour son
+domaine et les cas analytiques déjà vérifiés.
+
 | Jalon | Livrable | Critère de sortie |
 | --- | --- | --- |
 | A — Spécification numérique | Modèles, conventions et cas de référence | Entrées, hypothèses, résultats attendus et tolérances définis pour chaque cas |

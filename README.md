@@ -3,8 +3,9 @@
 Application de bureau Rust pour l'étude des réseaux de distribution publique
 HTA/BT, avec la France et Enedis comme référence métier.
 
-**État : premier prototype de modélisation et de partage. Les calculs de
-répartition de puissance et de courts-circuits ne sont pas encore implémentés.**
+**État : prototype de modélisation, partage et répartition de puissance AC
+équilibrée sur réseaux radiaux. Le calcul déséquilibré et les courts-circuits
+restent à implémenter.**
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -52,6 +53,34 @@ enregistrements successifs sans recopier l'historique déjà stocké.
 Après redémarrage, renseigner le chemin de la base, lister ses projets puis charger
 celui souhaité, ou ouvrir un fichier projet exporté.
 
+## Calculer le régime permanent
+
+Sur l'exemple rural, cocher **Autoriser les modèles simplifiés**, puis cliquer
+sur **Calculer le régime permanent**. Ce choix autorise explicitement les
+équivalents triphasés équilibrés des puissances monophasées et les transformateurs
+purement réactifs, sans déphasage, à rapport nominal. Il ne s'agit pas d'un calcul
+déséquilibré : aucun courant de neutre ou résultat par phase n'est calculé.
+
+Le calcul s'exécute en arrière-plan et peut être annulé. Les résultats apparaissent
+dans l'onglet **Résultats du calcul** : tensions composées, angles, courants,
+taux de charge et pertes. Les dépassements des seuils configurés sont signalés
+dans les tableaux et en rouge sur la vue géographique ; les valeurs se consultent
+aussi en survolant les objets de la carte. Les seuils par défaut sont indicatifs.
+
+Les résultats JSON exportés conservent la version exacte du réseau, celle du
+moteur, les options et les hypothèses. Ils concernent les données validées par
+création d'une version ; les champs en cours d'édition ne sont pas inclus.
+Un changement de version invalide l'affichage du calcul précédent. Les résultats
+restent en mémoire jusqu'à leur export et ne sont pas enregistrés avec le projet
+dans SQLite à ce stade.
+
+Sans l'option de simplification, le moteur accepte les réseaux radiaux à source
+unique avec charges/productions triphasées, lignes et interrupteurs. Les
+transformateurs insuffisamment paramétrés, boucles, sources multiples et îlots
+non alimentés sont refusés. Une non-convergence ne produit aucun tableau de résultats.
+La [spécification numérique du premier moteur](docs/calcul-regime-permanent.md)
+décrit ses conventions et sa validation.
+
 ## Partager une modification
 
 1. Exporter le projet de base A et le transmettre au destinataire.
@@ -75,6 +104,7 @@ Ces commandes fonctionnent sans ouvrir de fenêtre :
 ```sh
 cargo run -- --example /tmp/rural.json
 cargo run -- --check /tmp/rural.json
+cargo run -- --load-flow /tmp/rural.json --simplified
 cargo run -- --apply base.json modification.json resultat.json
 ```
 
@@ -94,14 +124,18 @@ Les tests couvrent le partage et la reconstruction, l'atomicité des lots,
 les conflits, les références invalides, les historiques SQLite, les exports
 sans écrasement, la connectivité, les géométries, la migration des anciens
 projets et le rendu des deux vues sans serveur graphique.
+Les tests numériques comparent les tensions, angles, courants et pertes à des
+solutions analytiques, puis vérifient le bilan du réseau rural, les erreurs
+attendues, l'annulation et l'invalidation des résultats après modification.
 
 ## Suite du développement
 
 - Compléter les modèles électriques : phases et neutre, matrices d'impédances,
   couplages des transformateurs, mises à la terre et équivalents de défaut.
-- Définir les cas numériques de validation puis développer les moteurs.
+- Étendre les cas de validation et les moteurs aux réseaux maillés,
+  au régime déséquilibré et aux courts-circuits.
 - Étendre les opérations à toutes les propriétés électriques et les exposer
   dans l'éditeur, avec création, raccordement et suppression d'équipements.
-- Ajouter cas d'étude, annuler/rétablir, résultats, exports de rapports et
+- Ajouter cas d'étude, annuler/rétablir, persistance des résultats, rapports et
   conditionnement compressé des échanges.
 - Vérifier l'application native et préparer les distributions Windows/Linux.

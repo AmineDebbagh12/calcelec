@@ -2,6 +2,7 @@ mod desktop;
 mod desktop_geo;
 
 use calcelec::{
+    load_flow::{self, Options},
     model::{Result, rural_example},
     project::ChangeSet,
     project::Project,
@@ -10,6 +11,10 @@ use calcelec::{
 
 fn command(args: &[String]) -> Result<()> {
     match args {
+        [cmd, path] if cmd == "--load-flow" => run_load_flow(path, false)?,
+        [cmd, path, flag] if cmd == "--load-flow" && flag == "--simplified" => {
+            run_load_flow(path, true)?
+        }
         [cmd, path] if cmd == "--example" => {
             let project = Project::new(rural_example())?;
             storage::export_new(path, &project.to_json()?)?;
@@ -35,9 +40,25 @@ fn command(args: &[String]) -> Result<()> {
             println!("Version reconstruite : {}", project.head());
         }
         _ => println!(
-            "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --apply base.json lot.json résultat.json\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
+            "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --apply base.json lot.json résultat.json\n  cargo run -- --load-flow projet.json [--simplified]  Calcul AC radial, résultats JSON sur stdout\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
         ),
     }
+    Ok(())
+}
+fn run_load_flow(path: &str, simplified: bool) -> Result<()> {
+    let project = storage::read_project(path)?;
+    let options = if simplified {
+        Options::simplified()
+    } else {
+        Options::default()
+    };
+    let report = load_flow::study(
+        &project,
+        &options,
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .map_err(|e| calcelec::model::Error::Invalid(e.to_string()))?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 fn main() -> std::process::ExitCode {

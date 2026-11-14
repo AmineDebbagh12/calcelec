@@ -143,6 +143,12 @@ pas les ouvrir. Les autres versions de schéma restent refusées.
 
 ## Limites et évolutions prévues
 
+Un premier export de résultats de régime permanent existe séparément du projet.
+Il inclut les identifiants du projet et de sa version, la version du moteur,
+les options, les hypothèses et les grandeurs calculées. Il ne modifie pas le
+schéma 2 du réseau et n'est pas encore persisté dans SQLite. Voir le
+[contrat du moteur](calcul-regime-permanent.md).
+
 - Pas encore d'empreinte cryptographique, de signature ou d'authentification :
   les UUID identifient les versions mais ne certifient pas leur contenu.
 - Les migrations futures devront être explicites, comme la migration 1 → 2.
