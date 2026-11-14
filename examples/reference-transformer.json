@@ -1,0 +1,198 @@
+{
+  "schema_version": 4,
+  "id": "374962bb-f497-409e-9e40-9134d81ce5da",
+  "root_version": "7d0002cd-01ab-464a-9fe4-9e6b4190f672",
+  "root": {
+    "name": "Référence synthétique — transformateur résistif Yyn0",
+    "frequency_hz": 50.0,
+    "coordinate_reference": "local_meters",
+    "objects": {
+      "15194cf5-d749-494a-afba-69c3fb8535ae": {
+        "id": "15194cf5-d749-494a-afba-69c3fb8535ae",
+        "name": "Secondaire 400 V",
+        "in_service": true,
+        "equipment": {
+          "type": "bus",
+          "voltage_v": 400.0
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            0.0,
+            0.0
+          ]
+        },
+        "electrical": {
+          "type": "bus",
+          "conductors": [
+            "A",
+            "B",
+            "C",
+            "N"
+          ],
+          "neutral_grounding": {
+            "type": "impedance",
+            "ohm": {
+              "r": 0.0,
+              "x": 0.0
+            }
+          }
+        }
+      },
+      "6062c819-a4a4-4ca5-b1fe-2346a70f5d99": {
+        "id": "6062c819-a4a4-4ca5-b1fe-2346a70f5d99",
+        "name": "Charge équilibrée 30 kW + j9 kvar",
+        "in_service": true,
+        "equipment": {
+          "type": "load",
+          "bus": "15194cf5-d749-494a-afba-69c3fb8535ae",
+          "p_w": 30000.0,
+          "q_var": 9000.0,
+          "phase": "Abc"
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            20.0,
+            10.0
+          ]
+        },
+        "electrical": {
+          "type": "injection",
+          "connection": {
+            "type": "three_phase_star",
+            "neutral": true
+          },
+          "fault_contribution": {
+            "type": "none"
+          }
+        }
+      },
+      "65d5cb04-b0a2-4c09-be78-1bdef584f0a9": {
+        "id": "65d5cb04-b0a2-4c09-be78-1bdef584f0a9",
+        "name": "Primaire 20 kV",
+        "in_service": true,
+        "equipment": {
+          "type": "bus",
+          "voltage_v": 20000.0
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            0.0,
+            0.0
+          ]
+        },
+        "electrical": {
+          "type": "bus",
+          "conductors": [
+            "A",
+            "B",
+            "C"
+          ],
+          "neutral_grounding": {
+            "type": "not_applicable"
+          }
+        }
+      },
+      "960600dc-2425-48c0-bd9e-6eeeb5d562db": {
+        "id": "960600dc-2425-48c0-bd9e-6eeeb5d562db",
+        "name": "Source HTA",
+        "in_service": true,
+        "equipment": {
+          "type": "source",
+          "bus": "65d5cb04-b0a2-4c09-be78-1bdef584f0a9",
+          "voltage_pu": 1.0
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            0.0,
+            0.0
+          ]
+        },
+        "electrical": {
+          "type": "source",
+          "positive_sequence_ohm": {
+            "r": 0.1,
+            "x": 0.2
+          },
+          "negative_sequence_ohm": {
+            "r": 0.1,
+            "x": 0.2
+          },
+          "zero_sequence_ohm": {
+            "r": 0.3,
+            "x": 0.4
+          },
+          "neutral_grounding": {
+            "type": "impedance",
+            "ohm": {
+              "r": 0.0,
+              "x": 0.0
+            }
+          }
+        }
+      },
+      "d0fbb5fe-461f-4e22-b723-fa1b1840b286": {
+        "id": "d0fbb5fe-461f-4e22-b723-fa1b1840b286",
+        "name": "Transformateur analytique Yyn0",
+        "in_service": true,
+        "equipment": {
+          "type": "transformer",
+          "from": "65d5cb04-b0a2-4c09-be78-1bdef584f0a9",
+          "to": "15194cf5-d749-494a-afba-69c3fb8535ae",
+          "rated_va": 100000.0,
+          "uk_percent": 4.0
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            0.0,
+            0.0
+          ]
+        },
+        "electrical": {
+          "type": "transformer",
+          "from": {
+            "connection": "star",
+            "rated_voltage_ll_v": 20000.0,
+            "neutral_terminal": false,
+            "grounding": {
+              "type": "isolated"
+            }
+          },
+          "to": {
+            "connection": "star",
+            "rated_voltage_ll_v": 400.0,
+            "neutral_terminal": true,
+            "grounding": {
+              "type": "impedance",
+              "ohm": {
+                "r": 0.0,
+                "x": 0.0
+              }
+            }
+          },
+          "clock": 0,
+          "copper_loss_w": 1000.0,
+          "iron_loss_w": 0.0,
+          "no_load_current_percent": 0.0,
+          "tap": {
+            "side": "from",
+            "min_position": -2,
+            "max_position": 2,
+            "neutral_position": 0,
+            "position": 0,
+            "step_percent": 2.5
+          },
+          "zero_sequence_ohm_referred_from": {
+            "r": 40.0,
+            "x": 150.0
+          }
+        }
+      }
+    }
+  },
+  "changes": []
+}

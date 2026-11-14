@@ -1,5 +1,6 @@
 //! Balanced radial AC power flow, current-summation backward/forward sweep.
 //! No shunts, tap control, transformer phase shift, neutral or zero-sequence model.
+use crate::electrical::{Conductor, ElectricalData};
 use crate::{
     model::{Equipment, Id, Network, Phase},
     project::Project,
@@ -11,7 +12,7 @@ use std::{
 };
 
 const BASE_VA: f64 = 1_000_000.0;
-pub const SOLVER_VERSION: &str = "radial-balanced-0.1";
+pub const SOLVER_VERSION: &str = "radial-balanced-0.2";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -242,6 +243,16 @@ impl Circuit {
         let mut approximated_transformers = 0;
         for o in network.objects.values().filter(|o| o.in_service) {
             cancelled(cancel)?;
+            if let Some(ElectricalData::Bus(data)) = &o.electrical
+                && [Conductor::A, Conductor::B, Conductor::C]
+                    .iter()
+                    .any(|c| !data.conductors.contains(c))
+            {
+                return Err(CalculationError::Unsupported(format!(
+                    "{} : jeu de barres non triphasé, moteur déséquilibré requis",
+                    o.name
+                )));
+            }
             match o.equipment {
                 Equipment::Source { bus, voltage_pu } => {
                     if let Some(i) = index.get(&bus) {
@@ -263,7 +274,9 @@ impl Circuit {
                     let Some(&i) = index.get(&bus) else {
                         continue;
                     };
-                    if phase != Phase::Abc {
+                    let unbalanced = phase != Phase::Abc
+                        || matches!(&o.electrical,Some(ElectricalData::Injection(data)) if !data.connection.balanced());
+                    if unbalanced {
                         if !options.allow_balanced_equivalent {
                             return Err(CalculationError::Unsupported(format!(
                                 "{} : charge/injection monophasée ; activer explicitement l'équivalent équilibré ou utiliser un futur moteur déséquilibré",
@@ -288,8 +301,16 @@ impl Circuit {
                     max_current_a,
                 } => {
                     if let (Some(&a), Some(&b)) = (index.get(&from), index.get(&to)) {
-                        let z = C::new(r_ohm_per_km, x_ohm_per_km)
-                            * (length_m / 1000.0 * BASE_VA / nominal[a].powi(2));
+                        let impedance = if let Some(ElectricalData::Line(data)) = &o.electrical {
+                            let z = data.balanced_impedance().map_err(|e| {
+                                CalculationError::Unsupported(format!("{} : {e}", o.name))
+                            })?;
+                            assumptions.push(format!("{} : impédance directe extraite de la matrice symétrique ; neutre non parcouru dans l'équivalent équilibré.",o.name));
+                            C::new(z.r, z.x)
+                        } else {
+                            C::new(r_ohm_per_km, x_ohm_per_km)
+                        };
+                        let z = impedance * (length_m / 1000.0 * BASE_VA / nominal[a].powi(2));
                         edges.push(Edge {
                             id: o.id,
                             a,
@@ -306,18 +327,42 @@ impl Circuit {
                     uk_percent,
                 } => {
                     if let (Some(&a), Some(&b)) = (index.get(&from), index.get(&to)) {
-                        if !options.allow_reactive_transformers {
-                            return Err(CalculationError::Unsupported(format!(
-                                "{} : paramètres de transformateur incomplets ; autoriser explicitement le modèle purement réactif simplifié",
-                                o.name
-                            )));
-                        }
-                        approximated_transformers += 1;
+                        let impedance = if let Some(ElectricalData::Transformer(data)) =
+                            &o.electrical
+                        {
+                            let supported = data.clock == 0
+                                && data.iron_loss_w == Some(0.0)
+                                && data.no_load_current_percent == Some(0.0)
+                                && (data.from.rated_voltage_ll_v / nominal[a] - 1.0).abs() < 1e-10
+                                && (data.to.rated_voltage_ll_v / nominal[b] - 1.0).abs() < 1e-10
+                                && data
+                                    .tap
+                                    .as_ref()
+                                    .is_none_or(|t| (t.factor() - 1.0).abs() < 1e-10);
+                            if !supported {
+                                return Err(CalculationError::Unsupported(format!(
+                                    "{} : le moteur actuel n'accepte les transformateurs détaillés qu'à rapport nominal, horaire 0 et excitation explicitement nulle ; les paramètres fournis ne seront pas ignorés",
+                                    o.name
+                                )));
+                            }
+                            let z = data.series_pu(rated_va, uk_percent)?;
+                            assumptions.push(format!("{} : résistance et réactance issues de uk et des pertes cuivre ; excitation nulle explicitement déclarée.",o.name));
+                            C::new(z.r, z.x) * (BASE_VA / rated_va)
+                        } else {
+                            if !options.allow_reactive_transformers {
+                                return Err(CalculationError::Unsupported(format!(
+                                    "{} : paramètres de transformateur incomplets ; autoriser explicitement le modèle purement réactif simplifié",
+                                    o.name
+                                )));
+                            }
+                            approximated_transformers += 1;
+                            C::new(0.0, uk_percent / 100.0 * BASE_VA / rated_va)
+                        };
                         edges.push(Edge {
                             id: o.id,
                             a,
                             b,
-                            z: C::new(0.0, uk_percent / 100.0 * BASE_VA / rated_va),
+                            z: impedance,
                             limit: Limit::Power(rated_va),
                         });
                     }
@@ -328,6 +373,16 @@ impl Circuit {
                     closed: true,
                 } => {
                     if let (Some(&a), Some(&b)) = (index.get(&from), index.get(&to)) {
+                        if let Some(ElectricalData::Switch { conductors }) = &o.electrical
+                            && [Conductor::A, Conductor::B, Conductor::C]
+                                .iter()
+                                .any(|c| !conductors.contains(c))
+                        {
+                            return Err(CalculationError::Unsupported(format!(
+                                "{} : interrupteur non triphasé",
+                                o.name
+                            )));
+                        }
                         edges.push(Edge {
                             id: o.id,
                             a,

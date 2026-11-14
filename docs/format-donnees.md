@@ -1,4 +1,4 @@
-# Contrat de données — prototype, schéma 3
+# Contrat de données — prototype, schéma 4
 
 Ce document décrit l'implémentation actuelle. Le cadrage fonctionnel reste la
 cible ; tous ses modèles et mécanismes ne sont pas encore réalisés.
@@ -9,7 +9,7 @@ Un projet JSON contient :
 
 | Champ | Sens |
 | --- | --- |
-| `schema_version` | Version du format, actuellement `3` |
+| `schema_version` | Version du format, actuellement `4` |
 | `id` | UUID stable du projet |
 | `root_version` | UUID de la version initiale |
 | `root` | Réseau initial, incluant tous les paramètres disponibles |
@@ -69,7 +69,7 @@ Exemple illustratif, avec identifiants à remplacer par ceux du projet concerné
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "project_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   "base_version": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -99,6 +99,12 @@ Opérations disponibles :
 | `set_switch` | `id`, `closed` pour interrupteur |
 | `set_geometry` | `id`, `geometry` : nouveau point ou nouveau tracé complet |
 | `set_equipment` | `id`, `equipment` : paramètres électriques et bornes, à type d'équipement inchangé |
+| `set_electrical` | `id`, `electrical` : modèle détaillé typé, ou `null` pour le retirer |
+
+Le champ optionnel `electrical` conserve conducteurs, matrices, enroulements,
+prises, mises à la terre et paramètres de défaut. Son absence signifie que ces
+données ne sont pas renseignées. Il ne remplace pas `equipment` ; leurs références
+et phases doivent rester cohérentes. Voir le [modèle détaillé](modele-electrique.md).
 
 `set_equipment` remplace uniquement les paramètres métier de l'objet ciblé,
 sans retransmettre son nom, son état ou sa géométrie. Les éditions de puissance
@@ -138,20 +144,23 @@ peuvent pas remplacer silencieusement leurs historiques. Une base plus récente
 ou une branche divergente provoque un conflit. L'interface peut lister et
 recharger les projets présents dans une base existante.
 
-## Migration depuis les schémas 1 et 2
+## Migration depuis les schémas 1, 2 et 3
 
-Les projets JSON de schémas 1 et 2 et leurs lots sont convertis explicitement vers
-le schéma 3 à la lecture. Les identifiants d'objets, projets, lots et versions
+Les projets JSON de schémas 1, 2 et 3 et leurs lots sont convertis explicitement vers
+le schéma 4 à la lecture. Les identifiants d'objets, projets, lots et versions
 restent inchangés. Les anciennes données sans coordonnées deviennent
 `unlocated`, dans un repère `local_meters`. Aucune localisation n'est inventée.
 Un ancien lot de schéma 1 reste importable, avec les mêmes règles de conflit
 et de réception répétée, et ne peut pas prétendre contenir des géométries.
 Les coordonnées existantes du schéma 2 sont conservées. `set_equipment` exige
-un lot de schéma 3 ; un lot de schéma 1 ou 2 contenant cette opération est refusé.
+un lot de schéma 3 au minimum ; un lot de schéma 1 ou 2 contenant cette opération est refusé.
+Le schéma 4 ajoute `electrical` et `set_electrical`. Aucun modèle détaillé n'est
+inventé lors de la migration. Ces champs ou opérations sont refusés dans les
+racines et lots portant une ancienne version de schéma.
 
 Les anciennes bases SQLite restent lisibles. Leur représentation est migrée
 dans la transaction lors de l'enregistrement d'un projet migré, après contrôle
-de son historique. Les exports suivants sont au schéma 3 et nécessitent cette
+de son historique. Les exports suivants sont au schéma 4 et nécessitent cette
 version de l'application ; les anciennes versions de l'application ne peuvent
 pas les ouvrir. Les autres versions de schéma restent refusées.
 
@@ -160,12 +169,12 @@ pas les ouvrir. Les autres versions de schéma restent refusées.
 Un premier export de résultats de régime permanent existe séparément du projet.
 Il inclut les identifiants du projet et de sa version, la version du moteur,
 les options, les hypothèses et les grandeurs calculées. Il ne modifie pas le
-schéma 3 du réseau et n'est pas encore persisté dans SQLite. Voir le
+schéma 4 du réseau et n'est pas encore persisté dans SQLite. Voir le
 [contrat du moteur](calcul-regime-permanent.md).
 
 - Pas encore d'empreinte cryptographique, de signature ou d'authentification :
   les UUID identifient les versions mais ne certifient pas leur contenu.
-- Les migrations futures devront être explicites, comme les migrations 1/2 → 3.
+- Les migrations futures devront être explicites, comme les migrations 1/2/3 → 4.
 - Historique linéaire par document/projet stocké ; pas encore de graphe de
   branches persistant, de fusion, d'export d'une plage de lots ni de points de reprise.
 - Pas de serveur partagé ; le contrat de données est indépendant de SQLite,

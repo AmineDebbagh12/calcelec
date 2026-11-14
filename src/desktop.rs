@@ -86,6 +86,7 @@ pub struct Desktop {
     to_bus: Option<Id>,
     draft: Option<Vec<Coordinate>>,
     equipment: Equipment,
+    electrical_text: String,
 }
 impl Desktop {
     pub fn new() -> Self {
@@ -124,6 +125,7 @@ impl Desktop {
             to_bus: None,
             draft: None,
             equipment: Equipment::Bus { voltage_v: 400.0 },
+            electrical_text: String::new(),
         }
     }
     fn report(&mut self, result: Result<String>) {
@@ -136,6 +138,11 @@ impl Desktop {
         self.name = object.name.clone();
         self.geometry = object.geometry.clone();
         self.equipment = object.equipment.clone();
+        self.electrical_text = object
+            .electrical
+            .as_ref()
+            .map(|data| serde_json::to_string_pretty(data).expect("validated electrical data"))
+            .unwrap_or_default();
         self.service = object.in_service;
         let (p, q) = object.power().unwrap_or_default();
         self.p_kw = p / 1000.0;
@@ -206,6 +213,18 @@ impl Desktop {
                 id,
                 geometry: self.geometry.clone(),
             });
+        }
+        let electrical = if self.electrical_text.trim().is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::from_str::<calcelec::electrical::ElectricalData>(
+                    &self.electrical_text,
+                )?,
+            )
+        };
+        if electrical != object.electrical {
+            operations.push(Operation::SetElectrical { id, electrical });
         }
         if operations.is_empty() {
             return Ok("Aucune propriété modifiée.".into());
@@ -777,6 +796,17 @@ impl Desktop {
                 );
             }
             self.equipment_editor(ui);
+            ui.collapsing("Modèle électrique détaillé — édition avancée",|ui| {
+                ui.small("Conducteurs, matrices, enroulements et mises à la terre. Les valeurs préremplies sont à vérifier avant validation.");
+                if ui.button("Préremplir une structure à compléter").clicked() {
+                    let mut draft_object=object.clone();draft_object.equipment=self.equipment.clone();
+                    self.electrical_text=serde_json::to_string_pretty(&calcelec::electrical::editing_template(&draft_object,&self.network)).unwrap();
+                }
+                ui.add(egui::TextEdit::multiline(&mut self.electrical_text).code_editor().desired_rows(12).desired_width(f32::INFINITY));
+                if ui.button("Retirer du brouillon les données détaillées").clicked() {self.electrical_text.clear();}
+                ui.small("Valider avec Créer une version. Un champ vide conserve seulement le modèle historique simplifié.");
+                for missing in calcelec::electrical::missing_data(&self.network).iter().filter(|m|m.object_id==id) {ui.label(&missing.message);}
+            });
             self.geometry_editor(ui, &object);
             ui.collapsing("Paramètres du modèle (SI)", |ui| {
                 ui.monospace(serde_json::to_string_pretty(&object.equipment).unwrap_or_default());
@@ -1093,6 +1123,13 @@ impl Desktop {
             });
             ui.colored_label(Color32::from_rgb(230,180,75),"Prototype — calcul AC équilibré radial disponible ; déséquilibré et courts-circuits à venir. Données synthétiques.");
             self.calculation_controls(ui);
+            let missing=calcelec::electrical::missing_data(&self.network);
+            ui.collapsing(format!("Données détaillées : {} informations à compléter",missing.len()),|ui| {
+                ui.small("Inventaire des données déclarées ; ce diagnostic ne remplace pas la validation d'un moteur déséquilibré ou de défaut.");
+                egui::ScrollArea::vertical().max_height(120.0).show(ui,|ui| {
+                    for item in missing {ui.label(format!("{} : {}",self.network.objects[&item.object_id].name,item.message));}
+                });
+            });
         });
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.colored_label(
@@ -1328,5 +1365,32 @@ mod tests {
         app.history.undo(&mut app.project, &app.author).unwrap();
         app.refresh().unwrap();
         assert_eq!(app.network, before);
+    }
+    #[test]
+    fn advanced_electrical_edit_is_versioned_and_invalid_json_is_atomic() {
+        let mut app = Desktop::new();
+        let id = app
+            .network
+            .objects
+            .values()
+            .find(|o| o.name == "Consommation agrégée 2")
+            .unwrap()
+            .id;
+        app.select(id);
+        app.electrical_text = serde_json::to_string(&calcelec::electrical::editing_template(
+            &app.network.objects[&id],
+            &app.network,
+        ))
+        .unwrap();
+        app.record().unwrap();
+        assert!(app.network.objects[&id].electrical.is_some());
+        assert_eq!(app.project.changes.len(), 1);
+        let before = app.project.clone();
+        app.electrical_text = "{invalide".into();
+        assert!(app.record().is_err());
+        assert_eq!(app.project, before);
+        app.history.undo(&mut app.project, &app.author).unwrap();
+        app.refresh().unwrap();
+        assert!(app.network.objects[&id].electrical.is_none());
     }
 }

@@ -232,6 +232,12 @@ fn difference(from: &Network, to: &Network) -> Vec<Operation> {
                     equipment: target.equipment.clone(),
                 });
             }
+            if source.electrical != target.electrical {
+                operations.push(Operation::SetElectrical {
+                    id: *id,
+                    electrical: target.electrical.clone(),
+                });
+            }
             if source.geometry != target.geometry {
                 operations.push(Operation::SetGeometry {
                     id: *id,

@@ -3,19 +3,46 @@ use crate::model::{Equipment, Error, Id, Network, Object, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
-    Create { object: Object },
-    Delete { id: Id },
-    Rename { id: Id, name: String },
-    SetService { id: Id, in_service: bool },
-    SetPower { id: Id, p_w: f64, q_var: f64 },
-    SetSwitch { id: Id, closed: bool },
-    SetGeometry { id: Id, geometry: Geometry },
-    SetEquipment { id: Id, equipment: Equipment },
+    Create {
+        object: Object,
+    },
+    Delete {
+        id: Id,
+    },
+    Rename {
+        id: Id,
+        name: String,
+    },
+    SetService {
+        id: Id,
+        in_service: bool,
+    },
+    SetPower {
+        id: Id,
+        p_w: f64,
+        q_var: f64,
+    },
+    SetSwitch {
+        id: Id,
+        closed: bool,
+    },
+    SetGeometry {
+        id: Id,
+        geometry: Geometry,
+    },
+    SetEquipment {
+        id: Id,
+        equipment: Equipment,
+    },
+    SetElectrical {
+        id: Id,
+        electrical: Option<crate::electrical::ElectricalData>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -43,6 +70,16 @@ pub struct Project {
 
 impl ChangeSet {
     pub(crate) fn migrate(mut self) -> Result<Self> {
+        if self.schema_version < 4
+            && self.operations.iter().any(|op| {
+                matches!(op, Operation::SetElectrical { .. })
+                    || matches!(op,Operation::Create {object} if object.electrical.is_some())
+            })
+        {
+            return Err(Error::Invalid(
+                "les modèles détaillés exigent le schéma 4".into(),
+            ));
+        }
         if self.schema_version < 3
             && self
                 .operations
@@ -57,7 +94,7 @@ impl ChangeSet {
             }
             self.schema_version = SCHEMA_VERSION;
         }
-        if self.schema_version == 2 {
+        if matches!(self.schema_version, 2 | 3) {
             self.schema_version = SCHEMA_VERSION;
         }
         supported(self.schema_version)?;
@@ -75,6 +112,17 @@ fn supported(version: u32) -> Result<()> {
 impl Project {
     /// Upgrade representation without changing object, batch or network-version IDs.
     pub(crate) fn migrate(mut self) -> Result<Self> {
+        if self.schema_version < 4
+            && self
+                .root
+                .objects
+                .values()
+                .any(|object| object.electrical.is_some())
+        {
+            return Err(Error::Invalid(
+                "les modèles détaillés exigent le schéma 4".into(),
+            ));
+        }
         if self.schema_version == 1 {
             if self.root.coordinate_reference != crate::geometry::CoordinateReference::LocalMeters
                 || self
@@ -89,7 +137,7 @@ impl Project {
             }
             self.schema_version = SCHEMA_VERSION;
         }
-        if self.schema_version == 2 {
+        if matches!(self.schema_version, 2 | 3) {
             self.schema_version = SCHEMA_VERSION;
         }
         supported(self.schema_version)?;
@@ -218,7 +266,9 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
             | Operation::SetService { id, .. }
             | Operation::SetPower { id, .. }
             | Operation::SetSwitch { id, .. } => id,
-            Operation::SetGeometry { id, .. } | Operation::SetEquipment { id, .. } => id,
+            Operation::SetGeometry { id, .. }
+            | Operation::SetEquipment { id, .. }
+            | Operation::SetElectrical { id, .. } => id,
             Operation::Create { .. } => unreachable!(),
         };
         let object = network
@@ -229,6 +279,7 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
             Operation::Delete { id } => {
                 network.objects.remove(id);
             }
+            Operation::SetElectrical { electrical, .. } => object.electrical = electrical.clone(),
             Operation::SetEquipment { equipment, .. } => {
                 if std::mem::discriminant(equipment) != std::mem::discriminant(&object.equipment) {
                     return Err(Error::Invalid("le type d'un ouvrage ne peut pas être changé par édition de ses propriétés".into()));

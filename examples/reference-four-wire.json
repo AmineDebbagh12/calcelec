@@ -1,0 +1,252 @@
+{
+  "schema_version": 4,
+  "id": "a4c8c827-d95b-4026-bd40-2ddbe8713a5b",
+  "root_version": "4bf9b243-cc79-4f41-be84-600d1279265b",
+  "root": {
+    "name": "Référence synthétique — câble quatre conducteurs",
+    "frequency_hz": 50.0,
+    "coordinate_reference": "local_meters",
+    "objects": {
+      "05aefcbe-74a6-4b7b-aea3-00da95073264": {
+        "id": "05aefcbe-74a6-4b7b-aea3-00da95073264",
+        "name": "Charge équilibrée 30 kW",
+        "in_service": true,
+        "equipment": {
+          "type": "load",
+          "bus": "2dfa3362-e360-48c2-b636-b16264982fc6",
+          "p_w": 30000.0,
+          "q_var": 0.0,
+          "phase": "Abc"
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            100.0,
+            10.0
+          ]
+        },
+        "electrical": {
+          "type": "injection",
+          "connection": {
+            "type": "three_phase_star",
+            "neutral": true
+          },
+          "fault_contribution": {
+            "type": "none"
+          }
+        }
+      },
+      "2dfa3362-e360-48c2-b636-b16264982fc6": {
+        "id": "2dfa3362-e360-48c2-b636-b16264982fc6",
+        "name": "Client BT",
+        "in_service": true,
+        "equipment": {
+          "type": "bus",
+          "voltage_v": 400.0
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            100.0,
+            0.0
+          ]
+        },
+        "electrical": {
+          "type": "bus",
+          "conductors": [
+            "A",
+            "B",
+            "C",
+            "N"
+          ],
+          "neutral_grounding": {
+            "type": "isolated"
+          }
+        }
+      },
+      "a1a1c4a5-bcec-4a14-b41e-a7c3814e12f4": {
+        "id": "a1a1c4a5-bcec-4a14-b41e-a7c3814e12f4",
+        "name": "Câble ABCN — 100 m",
+        "in_service": true,
+        "equipment": {
+          "type": "line",
+          "from": "a9f290dd-3607-4c10-b96c-3875a1bd4e92",
+          "to": "2dfa3362-e360-48c2-b636-b16264982fc6",
+          "length_m": 100.0,
+          "r_ohm_per_km": 0.38,
+          "x_ohm_per_km": 0.06,
+          "max_current_a": 150.0
+        },
+        "geometry": {
+          "type": "polyline",
+          "coordinates": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              100.0,
+              0.0
+            ]
+          ]
+        },
+        "electrical": {
+          "type": "line",
+          "conductors": [
+            "A",
+            "B",
+            "C",
+            "N"
+          ],
+          "series_ohm_per_km": [
+            [
+              {
+                "r": 0.4,
+                "x": 0.1
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              }
+            ],
+            [
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.4,
+                "x": 0.1
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              }
+            ],
+            [
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.4,
+                "x": 0.1
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              }
+            ],
+            [
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.02,
+                "x": 0.04
+              },
+              {
+                "r": 0.8,
+                "x": 0.1
+              }
+            ]
+          ],
+          "shunt_siemens_per_km": null
+        }
+      },
+      "a5a4ddda-1734-4802-b546-a44963cfaae6": {
+        "id": "a5a4ddda-1734-4802-b546-a44963cfaae6",
+        "name": "Source idéale en régime permanent",
+        "in_service": true,
+        "equipment": {
+          "type": "source",
+          "bus": "a9f290dd-3607-4c10-b96c-3875a1bd4e92",
+          "voltage_pu": 1.0
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            0.0,
+            0.0
+          ]
+        },
+        "electrical": {
+          "type": "source",
+          "positive_sequence_ohm": {
+            "r": 0.1,
+            "x": 0.2
+          },
+          "negative_sequence_ohm": {
+            "r": 0.1,
+            "x": 0.2
+          },
+          "zero_sequence_ohm": {
+            "r": 0.3,
+            "x": 0.4
+          },
+          "neutral_grounding": {
+            "type": "impedance",
+            "ohm": {
+              "r": 0.0,
+              "x": 0.0
+            }
+          }
+        }
+      },
+      "a9f290dd-3607-4c10-b96c-3875a1bd4e92": {
+        "id": "a9f290dd-3607-4c10-b96c-3875a1bd4e92",
+        "name": "Source BT",
+        "in_service": true,
+        "equipment": {
+          "type": "bus",
+          "voltage_v": 400.0
+        },
+        "geometry": {
+          "type": "point",
+          "coordinates": [
+            0.0,
+            0.0
+          ]
+        },
+        "electrical": {
+          "type": "bus",
+          "conductors": [
+            "A",
+            "B",
+            "C",
+            "N"
+          ],
+          "neutral_grounding": {
+            "type": "impedance",
+            "ohm": {
+              "r": 0.0,
+              "x": 0.0
+            }
+          }
+        }
+      }
+    }
+  },
+  "changes": []
+}

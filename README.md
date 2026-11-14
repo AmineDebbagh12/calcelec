@@ -92,6 +92,25 @@ Cette pile d'actions est locale à la session et se réinitialise lors d'un
 changement externe d'historique ; l'historique de versions reste partageable
 et persistant. Sauvegarder pour conserver les versions créées.
 
+## Données électriques détaillées
+
+L'inspecteur dispose d'une rubrique **Modèle électrique détaillé — édition avancée**
+pour renseigner les phases et le neutre, les matrices de ligne, les enroulements,
+prises et pertes des transformateurs, les mises à la terre et les paramètres de
+source. Cette première édition utilise du JSON typé, validé à la création d'une
+version. Les structures préremplies sont provisoires et doivent être vérifiées.
+Les données inconnues des anciens projets restent absentes ; l'application les
+signale dans **Données détaillées** et la commande `--check`.
+
+Deux cas synthétiques ouvrables depuis le panneau Projet sont fournis :
+[ligne quatre conducteurs](examples/reference-four-wire.json) et
+[transformateur avec pertes cuivre](examples/reference-transformer.json).
+Ils se calculent sans les options de simplification. Le moteur exploite leurs
+matrices équilibrées et leurs résistances ; les déphasages, prises hors nominal
+et matrices dissymétriques restent refusés explicitement.
+La [description du modèle électrique](docs/modele-electrique.md) précise les
+unités, conventions, limites et contrôles analytiques.
+
 ## Calculer le régime permanent
 
 Sur l'exemple rural, cocher **Autoriser les modèles simplifiés**, puis cliquer
@@ -145,6 +164,8 @@ cargo run -- --example /tmp/rural.json
 cargo run -- --check /tmp/rural.json
 cargo run -- --load-flow /tmp/rural.json --simplified
 cargo run -- --apply base.json modification.json resultat.json
+cargo run -- --reference-case four-wire /tmp/quatre-conducteurs.json
+cargo run -- --load-flow examples/reference-transformer.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -171,8 +192,8 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 ## Suite du développement
 
-- Compléter les modèles électriques : phases et neutre, matrices d'impédances,
-  couplages des transformateurs, mises à la terre et équivalents de défaut.
+- Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
+  les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
 - Étendre les cas de validation et les moteurs aux réseaux maillés,
   au régime déséquilibré et aux courts-circuits.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

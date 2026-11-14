@@ -290,7 +290,13 @@ de la modification des paramètres électriques, de la suppression explicite
 des dépendances, d'annuler/rétablir par lots de compensation et d'un premier
 moteur équilibré radial. Ce dernier couvre une partie du jalon B,
 avec des simplifications explicitement optionnelles pour l'exemple rural.
+Les données détaillées de phases, neutre, matrices, couplages, prises et mises
+à la terre sont désormais représentées et validées dans le format versionné,
+avec deux cas synthétiques à solution analytique. Le moteur équilibré exploite
+les matrices symétriques et les pertes cuivre dans son domaine actuel.
 Les calculs maillés, déséquilibrés et de courts-circuits restent à développer.
+Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventions
+et les données encore à compléter.
 Voir la [spécification du premier moteur](calcul-regime-permanent.md) pour son
 domaine et les cas analytiques déjà vérifiés.
 Le déplacement groupé des postes, l'ajustement automatique des tracés incidents

@@ -81,6 +81,8 @@ pub struct Object {
     pub equipment: Equipment,
     #[serde(default)]
     pub geometry: Geometry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electrical: Option<crate::electrical::ElectricalData>,
 }
 
 impl Object {
@@ -91,6 +93,7 @@ impl Object {
             in_service: true,
             equipment,
             geometry: Geometry::Unlocated,
+            electrical: None,
         }
     }
     pub fn kind(&self) -> &'static str {
@@ -180,6 +183,10 @@ impl Network {
                         object.name
                     )));
                 }
+            }
+            if let Some(data) = &object.electrical {
+                data.validate_for(object, self)
+                    .map_err(|error| Error::Invalid(format!("{} : {error}", object.name)))?;
             }
             match object.equipment {
                 Equipment::Bus { voltage_v } => positive(voltage_v, "tension nominale")?,

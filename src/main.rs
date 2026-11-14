@@ -15,6 +15,20 @@ fn command(args: &[String]) -> Result<()> {
         [cmd, path, flag] if cmd == "--load-flow" && flag == "--simplified" => {
             run_load_flow(path, true)?
         }
+        [cmd, kind, path] if cmd == "--reference-case" => {
+            let network = match kind.as_str() {
+                "four-wire" => calcelec::reference_cases::four_wire(),
+                "transformer" => calcelec::reference_cases::transformer(),
+                _ => {
+                    return Err(calcelec::model::Error::Invalid(
+                        "référence attendue : four-wire ou transformer".into(),
+                    ));
+                }
+            };
+            let project = Project::new(network)?;
+            storage::export_new(path, &project.to_json()?)?;
+            println!("Cas synthétique créé : {path}");
+        }
         [cmd, path] if cmd == "--example" => {
             let project = Project::new(rural_example())?;
             storage::export_new(path, &project.to_json()?)?;
@@ -31,6 +45,17 @@ fn command(args: &[String]) -> Result<()> {
                 project.head(),
                 network.unpowered_buses().len()
             );
+            let missing = calcelec::electrical::missing_data(&network);
+            println!(
+                "{} informations électriques détaillées à compléter",
+                missing.len()
+            );
+            for item in missing {
+                println!(
+                    "{} : {}",
+                    network.objects[&item.object_id].name, item.message
+                );
+            }
         }
         [cmd, input, delta, output] if cmd == "--apply" => {
             let mut project = storage::read_project(input)?;
@@ -40,7 +65,7 @@ fn command(args: &[String]) -> Result<()> {
             println!("Version reconstruite : {}", project.head());
         }
         _ => println!(
-            "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --apply base.json lot.json résultat.json\n  cargo run -- --load-flow projet.json [--simplified]  Calcul AC radial, résultats JSON sur stdout\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
+            "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --apply base.json lot.json résultat.json\n  cargo run -- --load-flow projet.json [--simplified]  Calcul AC radial, résultats JSON sur stdout\n  cargo run -- --reference-case four-wire|transformer projet.json\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
         ),
     }
     Ok(())

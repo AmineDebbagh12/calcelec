@@ -1,6 +1,6 @@
 # Premier moteur de régime permanent
 
-Identifiant : `radial-balanced-0.1`, implémenté dans `src/load_flow.rs`.
+Identifiant : `radial-balanced-0.2`, implémenté dans `src/load_flow.rs`.
 Ce jalon constitue une première partie du moteur équilibré du cadrage, sans
 couvrir encore les réseaux maillés ni le calcul déséquilibré de la V1.
 
@@ -35,6 +35,18 @@ Le modèle simplifié des transformateurs ne calcule pas leurs pertes actives.
 Les courants primaire et secondaire sont distincts et respectent le rapport
 des tensions de base. Ce modèle ne représente ni les couplages ni les chemins
 homopolaires et ne doit pas servir de modèle de court-circuit.
+
+## Exploitation des données détaillées
+
+Les matrices déclarées peuvent être utilisées lorsqu'elles admettent un
+équivalent direct équilibré exact : `Z1 = Zpropre − Zmutuelle`. L'ordre des
+conducteurs est explicite ; un neutre déclaré n'est pas éliminé à l'import.
+Les transformateurs détaillés utilisent R et X calculés depuis uk et les pertes
+cuivre, à rapport nominal, horaire 0 et excitation explicitement nulle.
+Les autres configurations détaillées sont refusées même avec `--simplified` ;
+le moteur ne remplace pas des données fournies par ses anciennes approximations.
+Les nouvelles validations et cas analytiques sont décrits dans le
+[modèle électrique détaillé](modele-electrique.md).
 
 ## Conventions et algorithme
 
