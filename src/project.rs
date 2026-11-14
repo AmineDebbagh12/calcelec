@@ -3,7 +3,7 @@ use crate::model::{Equipment, Error, Id, Network, Object, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -15,6 +15,7 @@ pub enum Operation {
     SetPower { id: Id, p_w: f64, q_var: f64 },
     SetSwitch { id: Id, closed: bool },
     SetGeometry { id: Id, geometry: Geometry },
+    SetEquipment { id: Id, equipment: Equipment },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -42,10 +43,21 @@ pub struct Project {
 
 impl ChangeSet {
     pub(crate) fn migrate(mut self) -> Result<Self> {
+        if self.schema_version < 3
+            && self
+                .operations
+                .iter()
+                .any(|op| matches!(op, Operation::SetEquipment { .. }))
+        {
+            return Err(Error::Invalid("set_equipment exige le schéma 3".into()));
+        }
         if self.schema_version == 1 {
             if self.operations.iter().any(|op| matches!(op, Operation::SetGeometry { .. }) || matches!(op, Operation::Create { object } if object.geometry != Geometry::Unlocated)) {
                 return Err(Error::Invalid("géométrie interdite dans un lot de schéma 1".into()));
             }
+            self.schema_version = SCHEMA_VERSION;
+        }
+        if self.schema_version == 2 {
             self.schema_version = SCHEMA_VERSION;
         }
         supported(self.schema_version)?;
@@ -75,6 +87,9 @@ impl Project {
                     "géométrie interdite dans un projet de schéma 1".into(),
                 ));
             }
+            self.schema_version = SCHEMA_VERSION;
+        }
+        if self.schema_version == 2 {
             self.schema_version = SCHEMA_VERSION;
         }
         supported(self.schema_version)?;
@@ -203,7 +218,7 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
             | Operation::SetService { id, .. }
             | Operation::SetPower { id, .. }
             | Operation::SetSwitch { id, .. } => id,
-            Operation::SetGeometry { id, .. } => id,
+            Operation::SetGeometry { id, .. } | Operation::SetEquipment { id, .. } => id,
             Operation::Create { .. } => unreachable!(),
         };
         let object = network
@@ -213,6 +228,12 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
         match operation {
             Operation::Delete { id } => {
                 network.objects.remove(id);
+            }
+            Operation::SetEquipment { equipment, .. } => {
+                if std::mem::discriminant(equipment) != std::mem::discriminant(&object.equipment) {
+                    return Err(Error::Invalid("le type d'un ouvrage ne peut pas être changé par édition de ses propriétés".into()));
+                }
+                object.equipment = equipment.clone();
             }
             Operation::Rename { name, .. } => object.name = name.clone(),
             Operation::SetGeometry { geometry, .. } => object.geometry = geometry.clone(),

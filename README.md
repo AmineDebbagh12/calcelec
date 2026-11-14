@@ -3,7 +3,7 @@
 Application de bureau Rust pour l'étude des réseaux de distribution publique
 HTA/BT, avec la France et Enedis comme référence métier.
 
-**État : prototype de modélisation, partage et répartition de puissance AC
+**État : prototype avec toolbox géographique, modélisation, partage et répartition de puissance AC
 équilibrée sur réseaux radiaux. Le calcul déséquilibré et les courts-circuits
 restent à implémenter.**
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
@@ -52,6 +52,45 @@ d'écraser un fichier existant ; utiliser un nouveau nom. SQLite permet des
 enregistrements successifs sans recopier l'historique déjà stocké.
 Après redémarrage, renseigner le chemin de la base, lister ses projets puis charger
 celui souhaité, ou ouvrir un fichier projet exporté.
+
+## Toolbox géographique
+
+La toolbox se trouve en haut du panneau droit. Les actions de carte concernent
+la vue géographique ; le glisser droit déplace la vue et la molette zoome.
+
+| Outil | Utilisation |
+| --- | --- |
+| Sélection | Cliquer un objet ; les clics répétés parcourent les objets superposés |
+| Placer | Choisir un poste HTA/BT, nœud HTA/BT, charge, production ou source, puis cliquer la carte ; choisir explicitement le nœud de raccordement des injections |
+| Raccorder | Choisir le type de liaison et ses deux bornes ; pour un tronçon, commencer le tracé, cliquer ses sommets intermédiaires puis terminer ; pour un interrupteur ou transformateur, créer la liaison avec le bouton |
+| Déplacer | Sélectionner l'objet puis glisser son point ou son tracé avec le bouton gauche |
+| Sommets | Sélectionner un tronçon puis glisser une de ses poignées ; ajouter/supprimer des sommets depuis les propriétés |
+
+**Échap** abandonne le geste ou le tracé en cours. Les placements et gestes de
+carte validés créent immédiatement une version en mémoire ; un déplacement ne
+produit qu'un seul lot au relâchement de la souris. Les modifications saisies
+dans les propriétés demandent toujours **Créer une version avec ces changements**.
+
+Les paramètres électriques et bornes de raccordement sont modifiables dans
+**Paramètres électriques et raccordements**. Les données invalides sont refusées
+sans application partielle. Les nouveaux équipements reçoivent des paramètres
+provisoires visibles dans l'inspecteur, qui ne constituent pas un catalogue Enedis.
+La longueur électrique d'un nouveau tronçon est initialisée depuis son tracé.
+Les déplacements ultérieurs ne changent ni cette longueur ni ses connexions.
+
+Un poste placé crée ensemble deux nœuds HTA/BT et un transformateur. Ces trois
+objets restent distincts et sélectionnables. Le déplacement agit sur l'objet
+sélectionné ; le déplacement groupé d'un poste et l'ajustement automatique des
+tracés incidents restent à ajouter. Une modification de borne ne déplace pas
+non plus automatiquement les extrémités dessinées d'un tronçon.
+
+La rubrique **Supprimer l'ouvrage** de l'inspecteur liste les objets qui le
+référencent. Leur suppression doit être choisie explicitement ; aucune suppression
+en cascade n'est cachée. **Annuler / Rétablir** restaure les objets et leurs
+identifiants par de nouveaux lots, sans réécrire les versions précédentes.
+Cette pile d'actions est locale à la session et se réinitialise lors d'un
+changement externe d'historique ; l'historique de versions reste partageable
+et persistant. Sauvegarder pour conserver les versions créées.
 
 ## Calculer le régime permanent
 
@@ -124,6 +163,8 @@ Les tests couvrent le partage et la reconstruction, l'atomicité des lots,
 les conflits, les références invalides, les historiques SQLite, les exports
 sans écrasement, la connectivité, les géométries, la migration des anciens
 projets et le rendu des deux vues sans serveur graphique.
+Les tests d’édition vérifient le placement, le tracé, les dépendances, les
+annulations et les gestes souris de déplacement et de modification des sommets.
 Les tests numériques comparent les tensions, angles, courants et pertes à des
 solutions analytiques, puis vérifient le bilan du réseau rural, les erreurs
 attendues, l'annulation et l'invalidation des résultats après modification.
@@ -134,8 +175,8 @@ attendues, l'annulation et l'invalidation des résultats après modification.
   couplages des transformateurs, mises à la terre et équivalents de défaut.
 - Étendre les cas de validation et les moteurs aux réseaux maillés,
   au régime déséquilibré et aux courts-circuits.
-- Étendre les opérations à toutes les propriétés électriques et les exposer
-  dans l'éditeur, avec création, raccordement et suppression d'équipements.
+- Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents
+  et un éditeur unifilaire complet.
 - Ajouter cas d'étude, annuler/rétablir, persistance des résultats, rapports et
   conditionnement compressé des échanges.
 - Vérifier l'application native et préparer les distributions Windows/Linux.

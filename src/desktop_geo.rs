@@ -4,9 +4,39 @@ use calcelec::{
 };
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum MapMode {
+    #[default]
+    Select,
+    Move,
+    Vertex,
+    Place,
+    Trace,
+}
+pub struct MapTools<'a> {
+    pub mode: MapMode,
+    pub draft: &'a [Coordinate],
+}
+#[derive(Debug)]
+pub enum MapEvent {
+    Select(Id),
+    Click(Coordinate),
+    SetGeometry { id: Id, geometry: Geometry },
+}
+struct GeometryDrag {
+    id: Id,
+    origin: Coordinate,
+    before: Geometry,
+    preview: Geometry,
+    vertex: Option<usize>,
+}
 #[derive(Default)]
 pub struct MapView {
     camera: Option<Camera>,
+    drag: Option<GeometryDrag>,
+    mode: MapMode,
+    #[cfg(test)]
+    last_rect: Option<Rect>,
 }
 #[derive(Clone, Copy)]
 struct Camera {
@@ -70,6 +100,10 @@ fn grid_step(target: f64) -> f64 {
 impl MapView {
     pub fn reset(&mut self) {
         self.camera = None;
+        self.drag = None;
+    }
+    pub fn cancel_drag(&mut self) {
+        self.drag = None;
     }
     pub fn show(
         &mut self,
@@ -77,20 +111,33 @@ impl MapView {
         network: &Network,
         selected: Option<Id>,
         results: Option<&calcelec::load_flow::LoadFlow>,
-    ) -> Option<Id> {
+        tools: MapTools<'_>,
+    ) -> Option<MapEvent> {
+        if self.mode != tools.mode {
+            self.drag = None;
+            self.mode = tools.mode;
+        }
+        let mut event = None;
         let mut fit = false;
         ui.horizontal(|ui| {
             fit = ui.button("Cadrer le réseau").clicked();
             ui.label(network.coordinate_reference.label());
         });
-        ui.small("Molette : zoom · Glisser : déplacement · Clic : sélection · Clics répétés : objets superposés");
+        ui.small("Molette : zoom · Glisser droit : déplacer la vue · Échap : abandonner l'action · Sélection : clics répétés pour les objets superposés");
         let height = (ui.available_height() * 0.55).clamp(220.0, 450.0);
         let (rect, response) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), height),
             Sense::click_and_drag(),
         );
+        #[cfg(test)]
+        {
+            self.last_rect = Some(rect);
+        }
         if fit || self.camera.is_none() {
-            self.camera = Camera::fit(network, rect);
+            self.camera = Some(Camera::fit(network, rect).unwrap_or(Camera {
+                center: Coordinate(0.0, 0.0),
+                pixels_per_m: 1.0,
+            }));
         }
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 4.0, Color32::from_rgb(19, 29, 38));
@@ -99,20 +146,17 @@ impl MapView {
             .values()
             .filter(|o| matches!(o.geometry, Geometry::Unlocated))
             .count();
-        let Some(mut camera) = self.camera else {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                "Aucun objet localisé — renseignez les géométries dans les propriétés.",
-                FontId::proportional(13.0),
-                Color32::LIGHT_GRAY,
-            );
-            return None;
-        };
-        let drag = response.drag_delta();
-        camera.center.0 -= drag.x as f64 / camera.pixels_per_m;
-        camera.center.1 += drag.y as f64 / camera.pixels_per_m;
-        if response.hovered()
+        let mut camera = self.camera.unwrap();
+        if response.dragged_by(egui::PointerButton::Secondary)
+            || (!matches!(tools.mode, MapMode::Move | MapMode::Vertex)
+                && response.dragged_by(egui::PointerButton::Primary))
+        {
+            let drag = response.drag_delta();
+            camera.center.0 -= drag.x as f64 / camera.pixels_per_m;
+            camera.center.1 += drag.y as f64 / camera.pixels_per_m;
+        }
+        if self.drag.is_none()
+            && response.hovered()
             && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
         {
             let factor = ui.input(|i| {
@@ -130,6 +174,74 @@ impl MapView {
             camera.center.1 += anchor.1 - after.1;
         }
         self.camera = Some(camera);
+        if response.drag_started_by(egui::PointerButton::Primary)
+            && matches!(tools.mode, MapMode::Move | MapMode::Vertex)
+            && let Some(object) = selected.and_then(|id| network.objects.get(&id))
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let vertex = if tools.mode == MapMode::Vertex {
+                object
+                    .geometry
+                    .coordinates()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| camera.screen(**p, rect).distance(press) < 12.0)
+                    .min_by(|(_, a), (_, b)| {
+                        camera
+                            .screen(**a, rect)
+                            .distance(press)
+                            .total_cmp(&camera.screen(**b, rect).distance(press))
+                    })
+                    .map(|(i, _)| i)
+            } else {
+                None
+            };
+            let hit = match &object.geometry {
+                Geometry::Point(p) => camera.screen(*p, rect).distance(press) < 12.0,
+                Geometry::Polyline(points) => points.windows(2).any(|s| {
+                    segment_distance(press, camera.screen(s[0], rect), camera.screen(s[1], rect))
+                        < 10.0
+                }),
+                Geometry::Unlocated => false,
+            };
+            if (tools.mode == MapMode::Move && hit)
+                || (tools.mode == MapMode::Vertex
+                    && vertex.is_some()
+                    && matches!(object.geometry, Geometry::Polyline(_)))
+            {
+                self.drag = Some(GeometryDrag {
+                    id: object.id,
+                    origin: camera.world(press, rect),
+                    before: object.geometry.clone(),
+                    preview: object.geometry.clone(),
+                    vertex,
+                });
+            }
+        }
+        if let Some(drag) = &mut self.drag
+            && let Some(cursor) = response.interact_pointer_pos()
+        {
+            let target = camera.world(cursor, rect);
+            let dx = target.0 - drag.origin.0;
+            let dy = target.1 - drag.origin.1;
+            drag.preview = match &drag.before {
+                Geometry::Point(p) => Geometry::Point(Coordinate(p.0 + dx, p.1 + dy)),
+                Geometry::Polyline(points) => Geometry::Polyline(
+                    points
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| {
+                            if drag.vertex.is_none_or(|v| v == i) {
+                                Coordinate(p.0 + dx, p.1 + dy)
+                            } else {
+                                *p
+                            }
+                        })
+                        .collect(),
+                ),
+                Geometry::Unlocated => Geometry::Unlocated,
+            };
+        }
         let step = grid_step(90.0 / camera.pixels_per_m);
         let left = camera.world(rect.left_bottom(), rect);
         let right = camera.world(rect.right_top(), rect);
@@ -157,8 +269,12 @@ impl MapView {
             .values()
             .filter(|o| matches!(o.geometry, Geometry::Polyline(_)))
         {
-            let points: Vec<_> = o
-                .geometry
+            let geometry = self
+                .drag
+                .as_ref()
+                .filter(|d| d.id == o.id)
+                .map_or(&o.geometry, |d| &d.preview);
+            let points: Vec<_> = geometry
                 .coordinates()
                 .iter()
                 .map(|p| camera.screen(*p, rect))
@@ -185,6 +301,11 @@ impl MapView {
             } else {
                 color
             };
+            if selected == Some(o.id) && tools.mode == MapMode::Vertex {
+                for p in &points {
+                    painter.circle_filled(*p, 5.0, Color32::YELLOW);
+                }
+            }
             for segment in points.windows(2) {
                 painter.line_segment(
                     [segment[0], segment[1]],
@@ -204,10 +325,15 @@ impl MapView {
             .values()
             .filter(|o| matches!(o.geometry, Geometry::Point(_)))
         {
-            let Geometry::Point(point) = o.geometry else {
+            let geometry = self
+                .drag
+                .as_ref()
+                .filter(|d| d.id == o.id)
+                .map_or(&o.geometry, |d| &d.preview);
+            let Geometry::Point(point) = geometry else {
                 continue;
             };
-            let p = camera.screen(point, rect);
+            let p = camera.screen(*point, rect);
             if !rect.expand(20.0).contains(p) {
                 continue;
             }
@@ -279,6 +405,37 @@ impl MapView {
                 .join("\n");
             response.clone().on_hover_text(label);
         }
+        if tools.mode == MapMode::Trace {
+            let mut preview: Vec<_> = tools
+                .draft
+                .iter()
+                .map(|p| camera.screen(*p, rect))
+                .collect();
+            if let Some(cursor) = pointer {
+                preview.push(cursor);
+            }
+            for segment in preview.windows(2) {
+                painter.line_segment([segment[0], segment[1]], Stroke::new(2.0, Color32::YELLOW));
+            }
+            for p in tools.draft {
+                painter.circle_filled(camera.screen(*p, rect), 4.0, Color32::YELLOW);
+            }
+        }
+        if response.drag_stopped_by(egui::PointerButton::Primary)
+            && let Some(drag) = self.drag.take()
+            && drag.preview != drag.before
+        {
+            event = Some(MapEvent::SetGeometry {
+                id: drag.id,
+                geometry: drag.preview,
+            });
+        }
+        if response.clicked()
+            && matches!(tools.mode, MapMode::Place | MapMode::Trace)
+            && let Some(p) = pointer
+        {
+            event = Some(MapEvent::Click(camera.world(p, rect)));
+        }
         let scale_m = grid_step(80.0 / camera.pixels_per_m);
         let a = rect.left_bottom() + Vec2::new(20.0, -24.0);
         let b = a + Vec2::new((scale_m * camera.pixels_per_m) as f32, 0.0);
@@ -304,13 +461,19 @@ impl MapView {
             FontId::proportional(11.0),
             Color32::LIGHT_GRAY,
         );
-        if response.clicked() && !hits.is_empty() {
+        if response.clicked()
+            && matches!(
+                tools.mode,
+                MapMode::Select | MapMode::Move | MapMode::Vertex
+            )
+            && !hits.is_empty()
+        {
             let index = selected
                 .and_then(|id| hits.iter().position(|(_, candidate)| *candidate == id))
                 .map_or(0, |i| (i + 1) % hits.len());
-            return Some(hits[index].1);
+            return Some(MapEvent::Select(hits[index].1));
         }
-        None
+        event
     }
 }
 
@@ -335,5 +498,209 @@ mod tests {
         let b = Pos2::new(100.0, 100.0);
         assert!(segment_distance(Pos2::new(50.0, 50.0), a, b) < 0.001);
         assert!(segment_distance(Pos2::new(0.0, 100.0), a, b) > 70.0);
+    }
+    fn frame(
+        map: &mut MapView,
+        ctx: &egui::Context,
+        n: &Network,
+        id: Id,
+        mode: MapMode,
+        events: Vec<egui::Event>,
+    ) -> Option<MapEvent> {
+        let mut event = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                event = map.show(ui, n, Some(id), None, MapTools { mode, draft: &[] });
+            },
+        );
+        output.textures_delta.clear();
+        event
+    }
+    fn pointer(pos: Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+    #[test]
+    fn point_drag_emits_one_geometry_edit_only_on_release() {
+        let n = calcelec::model::rural_example();
+        let id = n
+            .objects
+            .values()
+            .find(|o| o.name == "Poste source — HTA")
+            .unwrap()
+            .id;
+        let mut map = MapView {
+            camera: Some(Camera {
+                center: Coordinate(0.0, 0.0),
+                pixels_per_m: 1.0,
+            }),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        frame(&mut map, &ctx, &n, id, MapMode::Move, vec![]);
+        let start = map.last_rect.unwrap().center();
+        let end = start + Vec2::new(80.0, 20.0);
+        assert!(
+            frame(
+                &mut map,
+                &ctx,
+                &n,
+                id,
+                MapMode::Move,
+                vec![egui::Event::PointerMoved(start), pointer(start, true)]
+            )
+            .is_none()
+        );
+        assert!(
+            frame(
+                &mut map,
+                &ctx,
+                &n,
+                id,
+                MapMode::Move,
+                vec![egui::Event::PointerMoved(end)]
+            )
+            .is_none()
+        );
+        let event = frame(
+            &mut map,
+            &ctx,
+            &n,
+            id,
+            MapMode::Move,
+            vec![pointer(end, false)],
+        )
+        .unwrap();
+        let MapEvent::SetGeometry {
+            id: moved,
+            geometry: Geometry::Point(p),
+        } = event
+        else {
+            panic!("unexpected event {event:?}");
+        };
+        assert_eq!(moved, id);
+        assert!((p.0 - 80.0).abs() < 1e-5);
+        assert!((p.1 + 20.0).abs() < 1e-5);
+        assert_eq!(
+            n.objects[&id].geometry,
+            Geometry::Point(Coordinate(0.0, 0.0))
+        );
+    }
+    #[test]
+    fn vertex_drag_moves_only_the_chosen_vertex() {
+        let mut n = calcelec::model::rural_example();
+        let line = n
+            .objects
+            .values_mut()
+            .find(|o| matches!(o.equipment, Equipment::Line { .. }))
+            .unwrap();
+        let id = line.id;
+        line.geometry = Geometry::Polyline(vec![Coordinate(0.0, 0.0), Coordinate(100.0, 0.0)]);
+        let mut map = MapView {
+            camera: Some(Camera {
+                center: Coordinate(0.0, 0.0),
+                pixels_per_m: 1.0,
+            }),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        frame(&mut map, &ctx, &n, id, MapMode::Vertex, vec![]);
+        let start = map.last_rect.unwrap().center();
+        let end = start + Vec2::new(40.0, 16.0);
+        frame(
+            &mut map,
+            &ctx,
+            &n,
+            id,
+            MapMode::Vertex,
+            vec![egui::Event::PointerMoved(start), pointer(start, true)],
+        );
+        frame(
+            &mut map,
+            &ctx,
+            &n,
+            id,
+            MapMode::Vertex,
+            vec![egui::Event::PointerMoved(end)],
+        );
+        let event = frame(
+            &mut map,
+            &ctx,
+            &n,
+            id,
+            MapMode::Vertex,
+            vec![pointer(end, false)],
+        )
+        .unwrap();
+        let MapEvent::SetGeometry {
+            geometry: Geometry::Polyline(points),
+            ..
+        } = event
+        else {
+            panic!("unexpected event {event:?}");
+        };
+        assert_eq!(
+            points,
+            vec![Coordinate(40.0, -16.0), Coordinate(100.0, 0.0)]
+        );
+    }
+    #[test]
+    fn cancelling_a_drag_discards_preview_without_emitting_a_change() {
+        let n = calcelec::model::rural_example();
+        let id = n
+            .objects
+            .values()
+            .find(|o| o.name == "Poste source — HTA")
+            .unwrap()
+            .id;
+        let mut map = MapView {
+            camera: Some(Camera {
+                center: Coordinate(0.0, 0.0),
+                pixels_per_m: 1.0,
+            }),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        frame(&mut map, &ctx, &n, id, MapMode::Move, vec![]);
+        let start = map.last_rect.unwrap().center();
+        let end = start + Vec2::new(80.0, 20.0);
+        frame(
+            &mut map,
+            &ctx,
+            &n,
+            id,
+            MapMode::Move,
+            vec![egui::Event::PointerMoved(start), pointer(start, true)],
+        );
+        frame(
+            &mut map,
+            &ctx,
+            &n,
+            id,
+            MapMode::Move,
+            vec![egui::Event::PointerMoved(end)],
+        );
+        assert!(map.drag.is_some());
+        map.cancel_drag();
+        assert!(
+            frame(
+                &mut map,
+                &ctx,
+                &n,
+                id,
+                MapMode::Move,
+                vec![pointer(end, false)]
+            )
+            .is_none()
+        );
     }
 }

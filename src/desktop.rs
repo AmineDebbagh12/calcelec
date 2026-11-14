@@ -1,4 +1,5 @@
-use crate::desktop_geo::MapView;
+use crate::desktop_geo::{MapEvent, MapMode, MapTools, MapView};
+use calcelec::editor::{self, BranchKind, EditHistory, Placement};
 use calcelec::geometry::{Coordinate, Geometry};
 use calcelec::load_flow::{self, Options, StudyResult};
 use calcelec::{
@@ -13,6 +14,39 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
+
+fn numeric(ui: &mut egui::Ui, label: &str, value: &mut f64) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(6));
+    });
+}
+fn bus_choice(ui: &mut egui::Ui, network: &Network, label: &str, value: &mut Option<Id>) {
+    let selected = value
+        .and_then(|id| network.objects.get(&id))
+        .map(|o| o.name.as_str())
+        .unwrap_or("Choisir une borne");
+    egui::ComboBox::from_id_salt(label)
+        .selected_text(format!("{label} : {selected}"))
+        .show_ui(ui, |ui| {
+            let mut buses: Vec<_> = network
+                .objects
+                .values()
+                .filter(|o| matches!(o.equipment, Equipment::Bus { .. }))
+                .collect();
+            buses.sort_by_key(|o| &o.name);
+            for bus in buses {
+                ui.selectable_value(value, Some(bus.id), &bus.name);
+            }
+        });
+}
+fn required_bus_choice(ui: &mut egui::Ui, network: &Network, label: &str, value: &mut Id) {
+    let mut optional = Some(*value);
+    bus_choice(ui, network, label, &mut optional);
+    if let Some(id) = optional {
+        *value = id;
+    }
+}
 
 struct CalculationTask {
     receiver: mpsc::Receiver<load_flow::Result<StudyResult>>,
@@ -43,6 +77,15 @@ pub struct Desktop {
     simplified_calculation: bool,
     results_view: bool,
     result_path: String,
+    history: EditHistory,
+    tool: MapMode,
+    placement: Placement,
+    branch_kind: BranchKind,
+    attachment: Option<Id>,
+    from_bus: Option<Id>,
+    to_bus: Option<Id>,
+    draft: Option<Vec<Coordinate>>,
+    equipment: Equipment,
 }
 impl Desktop {
     pub fn new() -> Self {
@@ -72,6 +115,15 @@ impl Desktop {
             simplified_calculation: false,
             results_view: false,
             result_path: "resultats.calcelec.json".into(),
+            history: EditHistory::default(),
+            tool: MapMode::Select,
+            placement: Placement::Station,
+            branch_kind: BranchKind::Line,
+            attachment: None,
+            from_bus: None,
+            to_bus: None,
+            draft: None,
+            equipment: Equipment::Bus { voltage_v: 400.0 },
         }
     }
     fn report(&mut self, result: Result<String>) {
@@ -83,6 +135,7 @@ impl Desktop {
         self.selected = Some(id);
         self.name = object.name.clone();
         self.geometry = object.geometry.clone();
+        self.equipment = object.equipment.clone();
         self.service = object.in_service;
         let (p, q) = object.power().unwrap_or_default();
         self.p_kw = p / 1000.0;
@@ -90,6 +143,14 @@ impl Desktop {
     }
     fn refresh(&mut self) -> Result<()> {
         self.network = self.project.network()?;
+        self.history.sync(&self.project);
+        self.map.cancel_drag();
+        self.draft = None;
+        for endpoint in [&mut self.attachment, &mut self.from_bus, &mut self.to_bus] {
+            if endpoint.is_some_and(|id| !self.network.objects.contains_key(&id)) {
+                *endpoint = None;
+            }
+        }
         if self.study.as_ref().is_some_and(|s| {
             s.project_id != self.project.id || s.network_version != self.project.head()
         }) {
@@ -125,6 +186,12 @@ impl Desktop {
                 in_service: self.service,
             });
         }
+        if self.equipment != object.equipment {
+            operations.push(Operation::SetEquipment {
+                id,
+                equipment: self.equipment.clone(),
+            });
+        }
         if let Some((p, q)) = object.power()
             && ((p / 1000.0) != self.p_kw || (q / 1000.0) != self.q_kvar)
         {
@@ -143,12 +210,229 @@ impl Desktop {
         if operations.is_empty() {
             return Ok("Aucune propriété modifiée.".into());
         }
-        let change = self
-            .project
-            .prepare(&self.author, &self.message, operations);
-        self.project.apply(change)?;
+        self.history
+            .commit(&mut self.project, &self.author, &self.message, operations)?;
         self.refresh()?;
         Ok("Version créée en mémoire. Sauvegardez le projet ou la base pour la conserver.".into())
+    }
+    fn commit_edit(&mut self, message: &str, operations: Vec<Operation>) -> Result<String> {
+        let created = operations.iter().rev().find_map(|op| {
+            if let Operation::Create { object } = op {
+                Some(object.id)
+            } else {
+                None
+            }
+        });
+        self.history
+            .commit(&mut self.project, &self.author, message, operations)?;
+        self.refresh()?;
+        if let Some(id) = created {
+            self.select(id);
+        }
+        Ok(format!(
+            "{message} — version créée en mémoire, pensez à enregistrer."
+        ))
+    }
+    fn map_event(&mut self, event: MapEvent) {
+        let result = match event {
+            MapEvent::Select(id) => {
+                self.select(id);
+                return;
+            }
+            MapEvent::SetGeometry { id, geometry } => self.commit_edit(
+                "Modification géographique",
+                vec![Operation::SetGeometry { id, geometry }],
+            ),
+            MapEvent::Click(point) if self.tool == MapMode::Place => {
+                editor::placement(&self.network, self.placement, point, self.attachment)
+                    .and_then(|ops| self.commit_edit("Placement d'un ouvrage", ops))
+            }
+            MapEvent::Click(point) if self.tool == MapMode::Trace => {
+                if let Some(draft) = &mut self.draft {
+                    if draft.last() != Some(&point) {
+                        draft.push(point);
+                    }
+                    self.status="Sommet ajouté au brouillon ; terminez le tronçon avec le bouton de la toolbox.".into();
+                    self.error = false;
+                } else {
+                    self.status =
+                        "Choisissez les bornes puis commencez le tracé dans la toolbox.".into();
+                }
+                return;
+            }
+            _ => return,
+        };
+        self.report(result);
+    }
+    fn toolbox(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Toolbox");
+        ui.horizontal_wrapped(|ui| {
+            for (mode, label) in [
+                (MapMode::Select, "Sélection"),
+                (MapMode::Move, "Déplacer"),
+                (MapMode::Vertex, "Sommets"),
+                (MapMode::Place, "Placer"),
+                (MapMode::Trace, "Raccorder"),
+            ] {
+                if ui.selectable_value(&mut self.tool, mode, label).changed() {
+                    self.geographic = true;
+                    self.draft = None;
+                    self.map.cancel_drag();
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    self.history.can_undo(&self.project),
+                    egui::Button::new("Annuler"),
+                )
+                .clicked()
+            {
+                let r = self
+                    .history
+                    .undo(&mut self.project, &self.author)
+                    .and_then(|()| {
+                        self.refresh()?;
+                        Ok("Action annulée par une nouvelle version.".into())
+                    });
+                self.report(r);
+            }
+            if ui
+                .add_enabled(
+                    self.history.can_redo(&self.project),
+                    egui::Button::new("Rétablir"),
+                )
+                .clicked()
+            {
+                let r = self
+                    .history
+                    .redo(&mut self.project, &self.author)
+                    .and_then(|()| {
+                        self.refresh()?;
+                        Ok("Action rétablie par une nouvelle version.".into())
+                    });
+                self.report(r);
+            }
+        });
+        match self.tool {
+            MapMode::Select => {
+                ui.small("Sélectionnez un objet sur la carte ou dans le tableau.");
+            }
+            MapMode::Move => {
+                ui.small("Sélectionnez l'ouvrage, puis faites-le glisser avec le bouton gauche. Les raccordements et longueurs électriques sont conservés.");
+            }
+            MapMode::Vertex => {
+                ui.small("Sélectionnez un tronçon, puis glissez ses poignées. Ajoutez ou supprimez des sommets dans ses propriétés.");
+            }
+            MapMode::Place => {
+                egui::ComboBox::from_id_salt("placement_kind")
+                    .selected_text(self.placement.label())
+                    .show_ui(ui, |ui| {
+                        for kind in [
+                            Placement::Station,
+                            Placement::BusHta,
+                            Placement::BusBt,
+                            Placement::Load,
+                            Placement::Generator,
+                            Placement::Source,
+                        ] {
+                            ui.selectable_value(&mut self.placement, kind, kind.label());
+                        }
+                    });
+                if matches!(
+                    self.placement,
+                    Placement::Load | Placement::Generator | Placement::Source
+                ) {
+                    bus_choice(ui, &self.network, "Raccordement", &mut self.attachment);
+                }
+                ui.small("Cliquez sur la carte pour placer. Les paramètres initiaux sont provisoires : vérifiez-les dans les propriétés.");
+            }
+            MapMode::Trace => {
+                egui::ComboBox::from_id_salt("branch_kind")
+                    .selected_text(match self.branch_kind {
+                        BranchKind::Line => "Tronçon",
+                        BranchKind::Switch => "Interrupteur",
+                        BranchKind::Transformer => "Transformateur",
+                    })
+                    .show_ui(ui, |ui| {
+                        for (kind, label) in [
+                            (BranchKind::Line, "Tronçon"),
+                            (BranchKind::Switch, "Interrupteur"),
+                            (BranchKind::Transformer, "Transformateur"),
+                        ] {
+                            if ui
+                                .selectable_value(&mut self.branch_kind, kind, label)
+                                .changed()
+                            {
+                                self.draft = None;
+                            }
+                        }
+                    });
+                ui.add_enabled_ui(self.draft.is_none(), |ui| {
+                    bus_choice(ui, &self.network, "Borne départ", &mut self.from_bus);
+                    bus_choice(ui, &self.network, "Borne arrivée", &mut self.to_bus);
+                });
+                if self.branch_kind == BranchKind::Line {
+                    if self.draft.is_none() && ui.button("Commencer le tracé").clicked() {
+                        let r = editor::bus_point(&self.network, self.from_bus).and_then(|start| {
+                            editor::bus_point(&self.network, self.to_bus)?;
+                            if self.from_bus == self.to_bus {
+                                return Err(calcelec::model::Error::Invalid(
+                                    "deux bornes distinctes sont requises".into(),
+                                ));
+                            }
+                            self.draft = Some(vec![start]);
+                            Ok(
+                                "Cliquez les sommets intermédiaires, puis terminez le tracé."
+                                    .into(),
+                            )
+                        });
+                        self.report(r);
+                    }
+                    if let Some(draft) = &mut self.draft {
+                        ui.label(format!("{} sommets intermédiaires", draft.len() - 1));
+                        if ui
+                            .add_enabled(
+                                draft.len() > 1,
+                                egui::Button::new("Retirer le dernier sommet"),
+                            )
+                            .clicked()
+                        {
+                            draft.pop();
+                        }
+                    }
+                    if self.draft.is_some() && ui.button("Terminer le tronçon").clicked() {
+                        let intermediate = self.draft.as_ref().unwrap()[1..].to_vec();
+                        let r = editor::branch(
+                            &self.network,
+                            self.branch_kind,
+                            self.from_bus,
+                            self.to_bus,
+                            &intermediate,
+                        )
+                        .and_then(|op| self.commit_edit("Création d'un tronçon", vec![op]));
+                        self.report(r);
+                    }
+                    ui.small("Les extrémités viennent des bornes choisies. À la création, la longueur électrique est initialisée à celle du tracé ; elle reste ensuite indépendante.");
+                } else if ui.button("Créer la liaison entre les bornes").clicked() {
+                    let r = editor::branch(
+                        &self.network,
+                        self.branch_kind,
+                        self.from_bus,
+                        self.to_bus,
+                        &[],
+                    )
+                    .and_then(|op| self.commit_edit("Création d'une liaison", vec![op]));
+                    self.report(r);
+                }
+                if self.draft.is_some() && ui.button("Abandonner le tracé").clicked() {
+                    self.draft = None;
+                }
+                ui.small("Raccordements explicites ; aucun croisement de tracés ne connecte les ouvrages.");
+            }
+        }
+        ui.separator();
     }
     fn start_calculation(&mut self) {
         if self.calculation.is_some() {
@@ -492,6 +776,7 @@ impl Desktop {
                     "P positive : consommation pour une charge, injection pour un producteur.",
                 );
             }
+            self.equipment_editor(ui);
             self.geometry_editor(ui, &object);
             ui.collapsing("Paramètres du modèle (SI)", |ui| {
                 ui.monospace(serde_json::to_string_pretty(&object.equipment).unwrap_or_default());
@@ -511,9 +796,93 @@ impl Desktop {
             if ui.button("Réinitialiser les champs").clicked() {
                 self.select(id);
             }
+            ui.collapsing("Supprimer l'ouvrage", |ui| {
+                let linked = editor::dependents(&self.network, id);
+                if linked.is_empty() {
+                    if ui.button("Supprimer cet ouvrage").clicked() {
+                        let r = editor::deletion(&self.network, id, false)
+                            .and_then(|ops| self.commit_edit("Suppression d'un ouvrage", ops));
+                        self.report(r);
+                    }
+                } else {
+                    ui.label("Cet ouvrage est référencé par :");
+                    for other in &linked {
+                        ui.label(&self.network.objects[other].name);
+                    }
+                    if ui
+                        .button("Supprimer l'ouvrage ET les dépendances listées")
+                        .clicked()
+                    {
+                        let r = editor::deletion(&self.network, id, true).and_then(|ops| {
+                            self.commit_edit("Suppression avec dépendances explicites", ops)
+                        });
+                        self.report(r);
+                    }
+                }
+            });
         } else {
             ui.label("Sélectionnez un objet dans le tableau ou le schéma.");
         }
+    }
+    fn equipment_editor(&mut self, ui: &mut egui::Ui) {
+        ui.collapsing("Paramètres électriques et raccordements", |ui| {
+            match &mut self.equipment {
+                Equipment::Bus { voltage_v } => {
+                    numeric(ui, "Tension composée nominale (V)", voltage_v)
+                }
+                Equipment::Source { bus, voltage_pu } => {
+                    required_bus_choice(ui, &self.network, "Jeu de barres", bus);
+                    numeric(ui, "Tension source (pu)", voltage_pu);
+                }
+                Equipment::Line {
+                    from,
+                    to,
+                    length_m,
+                    r_ohm_per_km,
+                    x_ohm_per_km,
+                    max_current_a,
+                } => {
+                    required_bus_choice(ui, &self.network, "Départ", from);
+                    required_bus_choice(ui, &self.network, "Arrivée", to);
+                    numeric(ui, "Longueur électrique (m)", length_m);
+                    numeric(ui, "R (ohm/km)", r_ohm_per_km);
+                    numeric(ui, "X (ohm/km)", x_ohm_per_km);
+                    numeric(ui, "Courant admissible (A)", max_current_a);
+                }
+                Equipment::Transformer {
+                    from,
+                    to,
+                    rated_va,
+                    uk_percent,
+                } => {
+                    required_bus_choice(ui, &self.network, "Côté 1", from);
+                    required_bus_choice(ui, &self.network, "Côté 2", to);
+                    numeric(ui, "Puissance assignée (VA)", rated_va);
+                    numeric(ui, "uk (%)", uk_percent);
+                }
+                Equipment::Load { bus, phase, .. } | Equipment::Generator { bus, phase, .. } => {
+                    required_bus_choice(ui, &self.network, "Jeu de barres", bus);
+                    egui::ComboBox::from_id_salt("phase")
+                        .selected_text(format!("{phase:?}"))
+                        .show_ui(ui, |ui| {
+                            for value in [
+                                calcelec::model::Phase::Abc,
+                                calcelec::model::Phase::A,
+                                calcelec::model::Phase::B,
+                                calcelec::model::Phase::C,
+                            ] {
+                                ui.selectable_value(phase, value, format!("{value:?}"));
+                            }
+                        });
+                }
+                Equipment::Switch { from, to, closed } => {
+                    required_bus_choice(ui, &self.network, "Départ", from);
+                    required_bus_choice(ui, &self.network, "Arrivée", to);
+                    ui.checkbox(closed, "Fermé");
+                }
+            }
+            ui.small("Les changements de bornes sont explicites et ne déplacent pas la géométrie.");
+        });
     }
     fn geometry_editor(&mut self, ui: &mut egui::Ui, object: &calcelec::model::Object) {
         ui.separator();
@@ -710,6 +1079,11 @@ impl Desktop {
 impl Desktop {
     fn render(&mut self, ui: &mut egui::Ui) {
         self.poll_calculation();
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.draft = None;
+            self.map.cancel_drag();
+            self.tool = MapMode::Select;
+        }
         egui::Panel::top("header").show(ui, |ui| {
             ui.heading("CalcElec / Distribution publique");
             ui.label(&self.network.name);
@@ -734,6 +1108,7 @@ impl Desktop {
             .default_size(335.0)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.toolbox(ui);
                     self.inspector(ui);
                     ui.separator();
                     self.files(ui);
@@ -755,13 +1130,18 @@ impl Desktop {
                 ui.selectable_value(&mut self.geographic, false, "Vue topologique");
             });
             if self.geographic {
-                if let Some(id) = self.map.show(
+                let preview = self.draft.clone().unwrap_or_default();
+                if let Some(event) = self.map.show(
                     ui,
                     &self.network,
                     self.selected,
                     self.study.as_ref().map(|s| &s.result),
+                    MapTools {
+                        mode: self.tool,
+                        draft: &preview,
+                    },
                 ) {
-                    self.select(id);
+                    self.map_event(event);
                 }
             } else {
                 self.diagram(ui);
@@ -914,5 +1294,39 @@ mod tests {
         assert!(app.study.is_none());
         assert!(app.calculation.is_none());
         assert!(!app.error);
+    }
+    #[test]
+    fn toolbox_placement_and_geometry_edit_use_history_and_invalidate_results() {
+        let mut app = Desktop::new();
+        let before = app.network.clone();
+        app.study = Some(
+            load_flow::study(
+                &app.project,
+                &Options::simplified(),
+                &AtomicBool::new(false),
+            )
+            .unwrap(),
+        );
+        app.tool = MapMode::Place;
+        app.placement = Placement::BusBt;
+        app.map_event(MapEvent::Click(Coordinate(5000.0, 2000.0)));
+        assert!(!app.error);
+        assert!(app.study.is_none());
+        assert_eq!(app.network.objects.len(), before.objects.len() + 1);
+        let id = app.selected.unwrap();
+        app.map_event(MapEvent::SetGeometry {
+            id,
+            geometry: Geometry::Point(Coordinate(5100.0, 2000.0)),
+        });
+        assert_eq!(app.project.changes.len(), 2);
+        app.history.undo(&mut app.project, &app.author).unwrap();
+        app.refresh().unwrap();
+        assert_eq!(
+            app.network.objects[&id].geometry,
+            Geometry::Point(Coordinate(5000.0, 2000.0))
+        );
+        app.history.undo(&mut app.project, &app.author).unwrap();
+        app.refresh().unwrap();
+        assert_eq!(app.network, before);
     }
 }

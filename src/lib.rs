@@ -1,3 +1,4 @@
+pub mod editor;
 pub mod geometry;
 pub mod load_flow;
 pub mod model;

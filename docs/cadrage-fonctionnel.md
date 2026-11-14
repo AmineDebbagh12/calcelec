@@ -284,12 +284,17 @@ constitue pas encore une couverture complète des études de transport HTB.
 
 Ces jalons découpent la réalisation ; la V1 comprend leur ensemble.
 
-État d'implémentation : le prototype dispose du socle de versions, des géométries
-et d'un premier moteur équilibré radial. Ce dernier couvre une partie du jalon B,
+État d'implémentation : le prototype dispose du socle de versions, des géométries,
+d'une toolbox de placement, raccordement, déplacement et édition des sommets,
+de la modification des paramètres électriques, de la suppression explicite
+des dépendances, d'annuler/rétablir par lots de compensation et d'un premier
+moteur équilibré radial. Ce dernier couvre une partie du jalon B,
 avec des simplifications explicitement optionnelles pour l'exemple rural.
 Les calculs maillés, déséquilibrés et de courts-circuits restent à développer.
 Voir la [spécification du premier moteur](calcul-regime-permanent.md) pour son
 domaine et les cas analytiques déjà vérifiés.
+Le déplacement groupé des postes, l'ajustement automatique des tracés incidents
+et l'éditeur unifilaire complet restent à réaliser pour le jalon d'interface V1.
 
 | Jalon | Livrable | Critère de sortie |
 | --- | --- | --- |
