@@ -109,6 +109,31 @@ d'une sélection documentaire complémentaire avant leur implémentation.
 Prévoir des modèles paramétrés et réutilisables de câbles et transformateurs.
 La présence d'un disjoncteur dans le schéma ne signifie pas que sa protection est simulée.
 
+### Catalogue de technologies et de types d'ouvrages
+
+La V1 doit permettre de définir et réutiliser plusieurs technologies : câbles
+et lignes, par exemple 95AL, 150AL, 150CU et 148AA, ainsi que des types de
+transformateurs HTA/BT. Ces désignations sont des exemples de références à
+paramétrer ; leurs caractéristiques ne doivent pas être déduites du nom seul.
+
+- Chaque type possède un identifiant stable, une version, une désignation,
+  sa provenance, ses unités et un domaine d'emploi documenté.
+- Pour les lignes/câbles : matériau et section des conducteurs, constitution,
+  phases/neutre, matrices et limites de courant, avec conditions de référence
+  et hypothèses thermiques quand elles sont disponibles.
+- Pour les transformateurs : tensions et puissance assignées, couplage,
+  essais, prises et données de neutre/homopolaires disponibles.
+- Un ouvrage peut être instancié depuis un type et porter des variantes
+  explicites. Les paramètres de calcul sont figés ou rattachés à une version
+  immuable du type pour reconstruire les anciennes études.
+- La modification d'un type ne modifie jamais silencieusement les ouvrages
+  existants ; sa propagation est une action explicite, visible dans les lots.
+- Un projet autonome exporté inclut ses types ou leurs paramètres résolus.
+  L'absence d'une base de catalogue externe ne doit pas empêcher sa relecture.
+
+Le catalogue est prévu au scope V1 ; il n'est pas encore implémenté. Les valeurs
+provisoires de la toolbox ne constituent pas ce catalogue.
+
 ### Répartition de puissance
 
 - Calcul AC équilibré pour les premiers jalons du moteur.
@@ -172,6 +197,20 @@ la conformité : celle-ci demande un périmètre défini et une validation dédi
 - Export CSV et rapport synthétique exportable, avec modèle, cas d'étude,
   options, hypothèses et version du moteur.
 - Fonctionnement local hors ligne, sans compte obligatoire.
+
+### Ergonomie de l'édition géographique
+
+Prévoir une phase dédiée en fin de réalisation V1, avec essais sur les parcours
+réels : créer un départ, placer/raccorder un poste, choisir une technologie,
+modifier un tracé et comparer deux configurations.
+
+Évaluer et améliorer l'accès aux outils, la lisibilité des symboles et étiquettes,
+la sélection des objets superposés, l'accrochage aux bornes, les aperçus de tracé,
+le déplacement groupé des postes, les raccourcis et l'annulation des gestes.
+Les erreurs doivent guider leur correction sans exposer inutilement le format
+interne ; les formulaires métier doivent remplacer la saisie JSON pour les
+opérations courantes. Les parcours doivent être vérifiés sous Windows et Linux,
+à plusieurs tailles de fenêtre et sur un réseau représentatif de la cible.
 
 ### Objets, versions et échanges de modifications
 
@@ -294,7 +333,12 @@ Les données détaillées de phases, neutre, matrices, couplages, prises et mise
 à la terre sont désormais représentées et validées dans le format versionné,
 avec deux cas synthétiques à solution analytique. Le moteur équilibré exploite
 les matrices symétriques et les pertes cuivre dans son domaine actuel.
-Les calculs maillés, déséquilibrés et de courts-circuits restent à développer.
+Un premier moteur BT déséquilibré ABCN couvre désormais les départs radiaux
+avec source équivalente secondaire, neutre explicite et sans prises de terre aval.
+Il est validé par des solutions analytiques monophasées et par comparaison au
+moteur équilibré sur un cas symétrique. Les transformateurs en déséquilibré,
+terres distribuées, calculs maillés et courts-circuits restent à développer.
+Voir le [premier jalon ABCN](calcul-desequilibre.md) pour ses limites précises.
 Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventions
 et les données encore à compléter.
 Voir la [spécification du premier moteur](calcul-regime-permanent.md) pour son
@@ -310,6 +354,8 @@ et l'éditeur unifilaire complet restent à réaliser pour le jalon d'interface 
 | C — Distribution déséquilibrée | Phases, neutre et transformateurs | Cas monophasés et triphasés déséquilibrés validés avec chemins de retour |
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Défauts supportés validés, cas min/max et contributions vérifiés |
 | E — Application V1 | Éditeur, cas d'étude, résultats et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
+| E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
+| F — Ergonomie et livraison | Édition géographique affinée et distributions | Parcours métier testés avec des utilisateurs cibles ; corrections d'ergonomie et essais natifs Windows/Linux |
 
 Pour le contrat de données, vérifier aussi les échanges entre deux projets locaux,
 la réception répétée d'un lot, les variantes concurrentes et la sauvegarde puis

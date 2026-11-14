@@ -173,7 +173,10 @@ Les tests vérifient tensions, angles, courants et pertes face aux solutions
 analytiques, et le refus des modèles incompatibles ou non supportés. Ils
 couvrent aussi les permutations d'ordre de conducteurs, les données invalides,
 les migrations et les échanges/annulations/stockages des modifications détaillées.
-Le moteur déséquilibré, la comparaison à des outils indépendants et la validation
+Le premier moteur déséquilibré exploite désormais les matrices ABCN sur des
+départs radiaux sans transformateur et avec une seule terre source ; voir le
+[jalon déséquilibré](calcul-desequilibre.md). Son extension aux transformateurs
+et terres distribuées, la comparaison à des outils indépendants et la validation
 normative des calculs de courts-circuits restent à réaliser.
 
 Références de formulation consultées : [matrices de ligne OpenDSS / EPRI](https://opendss.epri.com/Properties14.html)

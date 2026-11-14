@@ -1,4 +1,4 @@
-use crate::desktop_geo::{MapEvent, MapMode, MapTools, MapView};
+use crate::desktop_geo::{MapEvent, MapMode, MapResults, MapTools, MapView};
 use calcelec::editor::{self, BranchKind, EditHistory, Placement};
 use calcelec::geometry::{Coordinate, Geometry};
 use calcelec::load_flow::{self, Options, StudyResult};
@@ -48,8 +48,12 @@ fn required_bus_choice(ui: &mut egui::Ui, network: &Network, label: &str, value:
     }
 }
 
+enum CalculationResult {
+    Balanced(StudyResult),
+    Unbalanced(calcelec::unbalanced::StudyResult),
+}
 struct CalculationTask {
-    receiver: mpsc::Receiver<load_flow::Result<StudyResult>>,
+    receiver: mpsc::Receiver<load_flow::Result<CalculationResult>>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -73,6 +77,8 @@ pub struct Desktop {
     status: String,
     error: bool,
     study: Option<StudyResult>,
+    unbalanced_study: Option<calcelec::unbalanced::StudyResult>,
+    use_unbalanced: bool,
     calculation: Option<CalculationTask>,
     simplified_calculation: bool,
     results_view: bool,
@@ -112,6 +118,8 @@ impl Desktop {
                 .into(),
             error: false,
             study: None,
+            unbalanced_study: None,
+            use_unbalanced: false,
             calculation: None,
             simplified_calculation: false,
             results_view: false,
@@ -162,6 +170,11 @@ impl Desktop {
             s.project_id != self.project.id || s.network_version != self.project.head()
         }) {
             self.study = None;
+        }
+        if self.unbalanced_study.as_ref().is_some_and(|s| {
+            s.project_id != self.project.id || s.network_version != self.project.head()
+        }) {
+            self.unbalanced_study = None;
         }
         if let Some(task) = &self.calculation {
             task.cancel.store(true, Ordering::Relaxed);
@@ -458,6 +471,7 @@ impl Desktop {
             return;
         }
         let project = self.project.clone();
+        let use_unbalanced = self.use_unbalanced;
         let options = if self.simplified_calculation {
             Options::simplified()
         } else {
@@ -467,11 +481,23 @@ impl Desktop {
         let worker_cancel = cancel.clone();
         let (sender, receiver) = mpsc::channel();
         self.study = None;
+        self.unbalanced_study = None;
         self.error = false;
         self.status = "Calcul en cours sur la version enregistrée en mémoire ; les champs non validés sont exclus.".into();
         self.calculation = Some(CalculationTask { receiver, cancel });
         std::thread::spawn(move || {
-            let _ = sender.send(load_flow::study(&project, &options, &worker_cancel));
+            let result = if use_unbalanced {
+                calcelec::unbalanced::study(
+                    &project,
+                    &calcelec::unbalanced::Options::default(),
+                    &worker_cancel,
+                )
+                .map(CalculationResult::Unbalanced)
+            } else {
+                load_flow::study(&project, &options, &worker_cancel)
+                    .map(CalculationResult::Balanced)
+            };
+            let _ = sender.send(result);
         });
     }
     fn poll_calculation(&mut self) {
@@ -495,7 +521,7 @@ impl Desktop {
             return;
         }
         match result {
-            Ok(study)
+            Ok(CalculationResult::Balanced(study))
                 if study.project_id == self.project.id
                     && study.network_version == self.project.head() =>
             {
@@ -508,6 +534,20 @@ impl Desktop {
                 self.error = false;
                 self.results_view = true;
                 self.study = Some(study);
+            }
+            Ok(CalculationResult::Unbalanced(study))
+                if study.project_id == self.project.id
+                    && study.network_version == self.project.head() =>
+            {
+                self.status = format!(
+                    "Calcul ABCN convergé en {} itérations · résidu {:.2e} pu · pertes {:.3} kW",
+                    study.result.iterations,
+                    study.result.residual_pu,
+                    study.result.total_loss_w / 1000.0
+                );
+                self.error = false;
+                self.results_view = true;
+                self.unbalanced_study = Some(study);
             }
             Ok(_) => {
                 self.error = false;
@@ -522,7 +562,9 @@ impl Desktop {
     fn calculation_controls(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(self.calculation.is_none(),|ui| {
-                ui.checkbox(&mut self.simplified_calculation,"Autoriser les modèles simplifiés").on_hover_text("Répartit les puissances monophasées sur trois phases et assimile uk des transformateurs à une réactance, sans pertes actives ni déphasage.");
+                ui.selectable_value(&mut self.use_unbalanced,false,"Équilibré");
+                ui.selectable_value(&mut self.use_unbalanced,true,"Déséquilibré ABCN");
+                ui.add_enabled(!self.use_unbalanced,egui::Checkbox::new(&mut self.simplified_calculation,"Autoriser les modèles simplifiés")).on_hover_text("Répartit les puissances monophasées sur trois phases et assimile uk des transformateurs à une réactance, sans pertes actives ni déphasage.");
                 if ui.button("Calculer le régime permanent").clicked() {self.start_calculation();}
             });
             if let Some(task)=&self.calculation {
@@ -531,11 +573,151 @@ impl Desktop {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
             }
         });
-        if self.simplified_calculation {
+        if self.use_unbalanced {
+            ui.small("ABCN : départ radial à tension unique, source idéale à neutre mis à la terre, sans terre aval ni transformateur. Exemple : examples/reference-unbalanced-bt.json.");
+        } else if self.simplified_calculation {
             ui.small("Hypothèses : équivalents équilibrés des charges monophasées ; transformateurs purement réactifs, rapport nominal, sans déphasage. Aucun calcul du neutre.");
         }
     }
+    fn unbalanced_results_table(&mut self, ui: &mut egui::Ui) {
+        let Some(study) = &self.unbalanced_study else {
+            return;
+        };
+        let r = &study.result;
+        ui.strong("Résultats déséquilibrés — A / B / C / N");
+        ui.label(format!(
+            "Source : {:.3} kW / {:.3} kvar · Demande nette : {:.3} kW · Pertes : {:.3} kW",
+            r.source_p_w / 1000.0,
+            r.source_q_var / 1000.0,
+            r.net_demand_p_w / 1000.0,
+            r.total_loss_w / 1000.0
+        ));
+        ui.small(format!(
+            "{} itérations · résidu {:.2e} pu · bilan {:.3e} VA",
+            r.iterations, r.residual_pu, r.balance_error_va
+        ));
+        ui.collapsing("Hypothèses et traçabilité du calcul ABCN", |ui| {
+            ui.label(format!(
+                "{} · réseau {} · tolérance {:.1e} pu",
+                study.solver_version, study.network_version, study.options.tolerance_pu
+            ));
+            for assumption in &r.assumptions {
+                ui.label(assumption);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(&mut self.result_path);
+            if ui.button("Exporter les résultats JSON").clicked() {
+                let result = serde_json::to_string(study)
+                    .map_err(Into::into)
+                    .and_then(|json| storage::export_new(&self.result_path, &json));
+                self.error = result.is_err();
+                self.status = match result {
+                    Ok(()) => {
+                        "Résultats ABCN exportés avec phaseurs, version et hypothèses.".into()
+                    }
+                    Err(e) => e.to_string(),
+                };
+            }
+        });
+        let mut clicked = None;
+        ui.small("Tensions phase-neutre : V / angle (°) ; |VN| : potentiel du neutre par rapport à la terre source.");
+        egui::Grid::new("unbalanced_buses")
+            .striped(true)
+            .show(ui, |ui| {
+                for title in [
+                    "Jeu de barres",
+                    "A-N",
+                    "B-N",
+                    "C-N",
+                    "|VN| (V)",
+                    "U2/U1 (%)",
+                ] {
+                    ui.strong(title);
+                }
+                ui.end_row();
+                let mut buses: Vec<_> = r.buses.iter().collect();
+                buses.sort_by_key(|b| &self.network.objects[&b.id].name);
+                for bus in buses {
+                    if ui
+                        .selectable_label(
+                            self.selected == Some(bus.id),
+                            &self.network.objects[&bus.id].name,
+                        )
+                        .clicked()
+                    {
+                        clicked = Some(bus.id);
+                    }
+                    for v in &bus.phase_neutral {
+                        ui.colored_label(
+                            if v.outside_voltage_limits {
+                                Color32::LIGHT_RED
+                            } else {
+                                Color32::LIGHT_GREEN
+                            },
+                            format!("{:.2} / {:.1}°", v.magnitude_v, v.angle_deg),
+                        );
+                    }
+                    ui.label(format!("{:.3}", bus.neutral_displacement_v));
+                    ui.label(format!("{:.3}", bus.negative_sequence_percent));
+                    ui.end_row();
+                }
+            });
+        ui.separator();
+        ui.strong("Courants par conducteur — sens source vers aval");
+        egui::Grid::new("unbalanced_branches")
+            .striped(true)
+            .show(ui, |ui| {
+                for title in [
+                    "Branche",
+                    "IA (A)",
+                    "IB (A)",
+                    "IC (A)",
+                    "IN (A)",
+                    "Charge (%)",
+                    "Pertes (W)",
+                ] {
+                    ui.strong(title);
+                }
+                ui.end_row();
+                let mut branches: Vec<_> = r.branches.iter().collect();
+                branches.sort_by_key(|b| &self.network.objects[&b.id].name);
+                for b in branches {
+                    if ui
+                        .selectable_label(
+                            self.selected == Some(b.id),
+                            &self.network.objects[&b.id].name,
+                        )
+                        .clicked()
+                    {
+                        clicked = Some(b.id);
+                    }
+                    for current in b.currents_a {
+                        ui.label(format!("{:.2}", current.magnitude()));
+                    }
+                    ui.colored_label(
+                        if b.loading_percent.is_some_and(|p| p > 100.0) {
+                            Color32::LIGHT_RED
+                        } else {
+                            Color32::LIGHT_GREEN
+                        },
+                        b.loading_percent
+                            .map(|p| format!("{p:.1}"))
+                            .unwrap_or_else(|| "—".into()),
+                    );
+                    ui.label(format!("{:.2}", b.loss_w));
+                    ui.end_row();
+                }
+            });
+        if let Some(id) = clicked {
+            self.select(id);
+        }
+    }
     fn results_table(&mut self, ui: &mut egui::Ui) {
+        if self.unbalanced_study.is_some() {
+            self.unbalanced_results_table(ui);
+            return;
+        }
         let Some(study) = &self.study else {
             ui.label("Aucun résultat pour cette version. Lancez un calcul ; l'exemple rural nécessite les modèles simplifiés.");
             return;
@@ -1121,7 +1303,7 @@ impl Desktop {
                 ui.label(format!("{} objets · {} versions enregistrées en mémoire",self.network.objects.len(),self.project.changes.len()+1));
                 ui.small(format!("Version {}",self.project.head()));
             });
-            ui.colored_label(Color32::from_rgb(230,180,75),"Prototype — calcul AC équilibré radial disponible ; déséquilibré et courts-circuits à venir. Données synthétiques.");
+            ui.colored_label(Color32::from_rgb(230,180,75),"Prototype — calculs AC équilibré radial et BT ABCN disponibles ; courts-circuits à venir. Données synthétiques.");
             self.calculation_controls(ui);
             let missing=calcelec::electrical::missing_data(&self.network);
             ui.collapsing(format!("Données détaillées : {} informations à compléter",missing.len()),|ui| {
@@ -1172,7 +1354,14 @@ impl Desktop {
                     ui,
                     &self.network,
                     self.selected,
-                    self.study.as_ref().map(|s| &s.result),
+                    self.study
+                        .as_ref()
+                        .map(|s| MapResults::Balanced(&s.result))
+                        .or_else(|| {
+                            self.unbalanced_study
+                                .as_ref()
+                                .map(|s| MapResults::Unbalanced(&s.result))
+                        }),
                     MapTools {
                         mode: self.tool,
                         draft: &preview,
@@ -1292,7 +1481,9 @@ mod tests {
     }
     fn deliver(app: &mut Desktop, report: StudyResult, cancelled: bool) {
         let (sender, receiver) = mpsc::channel();
-        sender.send(Ok(report)).unwrap();
+        sender
+            .send(Ok(CalculationResult::Balanced(report)))
+            .unwrap();
         app.calculation = Some(CalculationTask {
             receiver,
             cancel: Arc::new(AtomicBool::new(cancelled)),
@@ -1392,5 +1583,52 @@ mod tests {
         app.history.undo(&mut app.project, &app.author).unwrap();
         app.refresh().unwrap();
         assert!(app.network.objects[&id].electrical.is_none());
+    }
+    #[test]
+    fn unbalanced_results_render_and_are_discarded_after_a_version_change() {
+        let mut app = Desktop::new();
+        app.network = calcelec::reference_cases::unbalanced_bt();
+        app.project = Project::new(app.network.clone()).unwrap();
+        app.use_unbalanced = true;
+        let report = calcelec::unbalanced::study(
+            &app.project,
+            &calcelec::unbalanced::Options::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let deliver = |app: &mut Desktop, report: calcelec::unbalanced::StudyResult| {
+            let (sender, receiver) = mpsc::channel();
+            sender
+                .send(Ok(CalculationResult::Unbalanced(report)))
+                .unwrap();
+            app.calculation = Some(CalculationTask {
+                receiver,
+                cancel: Arc::new(AtomicBool::new(false)),
+            });
+            app.poll_calculation();
+        };
+        deliver(&mut app, report.clone());
+        assert!(app.unbalanced_study.is_some());
+        assert!(app.results_view);
+        let context = egui::Context::default();
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1280.0, 1024.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        assert!(!output.shapes.is_empty());
+        output.textures_delta.clear();
+        let id = *app.network.objects.keys().next().unwrap();
+        app.select(id);
+        app.name = "Nom corrigé".into();
+        app.record().unwrap();
+        assert!(app.unbalanced_study.is_none());
+        deliver(&mut app, report);
+        assert!(app.unbalanced_study.is_none());
     }
 }

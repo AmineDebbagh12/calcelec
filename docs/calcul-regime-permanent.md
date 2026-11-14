@@ -2,7 +2,8 @@
 
 Identifiant : `radial-balanced-0.2`, implémenté dans `src/load_flow.rs`.
 Ce jalon constitue une première partie du moteur équilibré du cadrage, sans
-couvrir encore les réseaux maillés ni le calcul déséquilibré de la V1.
+couvrir encore les réseaux maillés. Le [premier moteur déséquilibré BT](calcul-desequilibre.md)
+est désormais disponible séparément, avec son propre domaine de calcul.
 
 ## Domaine de calcul
 

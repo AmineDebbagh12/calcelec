@@ -203,3 +203,58 @@ pub fn transformer() -> Network {
         vec![a, b, source, transformer, load],
     )
 }
+
+/// Synthetic BT feeder with distinct single-phase loads and a single-phase PV injection.
+pub fn unbalanced_bt() -> Network {
+    let mut n = four_wire();
+    n.name = "Référence synthétique — BT déséquilibrée avec neutre et PV".into();
+    n.objects
+        .retain(|_, o| !matches!(o.equipment, Equipment::Load { .. }));
+    let bus = n
+        .objects
+        .values()
+        .find(|o| o.name == "Client BT")
+        .unwrap()
+        .id;
+    for (phase, conductor, p_w, q_var, y) in [
+        (Phase::A, Conductor::A, 12000.0, 1800.0, 20.0),
+        (Phase::B, Conductor::B, 8000.0, 1000.0, 0.0),
+        (Phase::C, Conductor::C, 5000.0, 600.0, -20.0),
+    ] {
+        let load = object(
+            &format!("Clients phase {phase:?}"),
+            Equipment::Load {
+                bus,
+                p_w,
+                q_var,
+                phase,
+            },
+            ElectricalData::Injection(InjectionData {
+                connection: InjectionConnection::PhaseNeutral { phase: conductor },
+                fault_contribution: FaultContribution::None,
+            }),
+            Coordinate(130.0, y),
+        );
+        n.objects.insert(load.id, load);
+    }
+    let pv = object(
+        "PV monophasé C — 10 kW",
+        Equipment::Generator {
+            bus,
+            p_w: 10000.0,
+            q_var: 0.0,
+            phase: Phase::C,
+        },
+        ElectricalData::Injection(InjectionData {
+            connection: InjectionConnection::PhaseNeutral {
+                phase: Conductor::C,
+            },
+            fault_contribution: FaultContribution::CurrentLimited {
+                max_current_a: 60.0,
+            },
+        }),
+        Coordinate(160.0, -20.0),
+    );
+    n.objects.insert(pv.id, pv);
+    n
+}

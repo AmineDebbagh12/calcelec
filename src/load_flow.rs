@@ -131,63 +131,7 @@ pub struct StudyResult {
     pub result: LoadFlow,
 }
 
-// A minimal private complex scalar keeps numerical conventions in one place.
-#[derive(Clone, Copy, Debug, Default)]
-struct C {
-    re: f64,
-    im: f64,
-}
-impl C {
-    fn new(re: f64, im: f64) -> Self {
-        Self { re, im }
-    }
-    fn conj(self) -> Self {
-        Self::new(self.re, -self.im)
-    }
-    fn abs(self) -> f64 {
-        self.re.hypot(self.im)
-    }
-    fn finite(self) -> bool {
-        self.re.is_finite() && self.im.is_finite()
-    }
-}
-impl std::ops::Add for C {
-    type Output = Self;
-    fn add(self, b: Self) -> Self {
-        Self::new(self.re + b.re, self.im + b.im)
-    }
-}
-impl std::ops::Sub for C {
-    type Output = Self;
-    fn sub(self, b: Self) -> Self {
-        Self::new(self.re - b.re, self.im - b.im)
-    }
-}
-impl std::ops::Mul for C {
-    type Output = Self;
-    fn mul(self, b: Self) -> Self {
-        Self::new(
-            self.re * b.re - self.im * b.im,
-            self.re * b.im + self.im * b.re,
-        )
-    }
-}
-impl std::ops::Mul<f64> for C {
-    type Output = Self;
-    fn mul(self, b: f64) -> Self {
-        Self::new(self.re * b, self.im * b)
-    }
-}
-impl std::ops::Div for C {
-    type Output = Self;
-    fn div(self, b: Self) -> Self {
-        let d = b.re * b.re + b.im * b.im;
-        Self::new(
-            (self.re * b.re + self.im * b.im) / d,
-            (self.im * b.re - self.re * b.im) / d,
-        )
-    }
-}
+use crate::complex::C;
 
 struct Edge {
     id: Id,

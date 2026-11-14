@@ -4,8 +4,8 @@ Application de bureau Rust pour l'étude des réseaux de distribution publique
 HTA/BT, avec la France et Enedis comme référence métier.
 
 **État : prototype avec toolbox géographique, modélisation, partage et répartition de puissance AC
-équilibrée sur réseaux radiaux. Le calcul déséquilibré et les courts-circuits
-restent à implémenter.**
+équilibrée sur réseaux radiaux, plus un premier moteur BT déséquilibré ABCN.
+Les transformateurs en déséquilibré et les courts-circuits restent à implémenter.**
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -139,6 +139,22 @@ non alimentés sont refusés. Une non-convergence ne produit aucun tableau de r�
 La [spécification numérique du premier moteur](docs/calcul-regime-permanent.md)
 décrit ses conventions et sa validation.
 
+## Calcul déséquilibré BT avec neutre
+
+Ouvrir `examples/reference-unbalanced-bt.json` dans le panneau Projet, puis
+choisir **Déséquilibré ABCN** et lancer le calcul. Ce moteur utilise les matrices
+primitives des quatre conducteurs et les connexions détaillées des charges/PV.
+Il présente les tensions et angles par phase, les courants A/B/C/N, le potentiel
+du neutre, le déséquilibre U2/U1 et les pertes. Les résultats sont exportables
+avec leur version et leurs hypothèses.
+
+Ce premier jalon accepte les départs radiaux à tension unique, avec neutre mis
+à la terre à la source et sans terre locale aval. Les transformateurs, terres
+aval multiples, shunts, phases manquantes et points étoile flottants sont encore
+refusés. L'exemple rural HTA/BT initial reste donc à calculer avec le moteur
+équilibré simplifié ; il ne doit pas être converti implicitement en réseau ABCN.
+Voir le [domaine et les validations du moteur déséquilibré](docs/calcul-desequilibre.md).
+
 ## Partager une modification
 
 1. Exporter le projet de base A et le transmettre au destinataire.
@@ -166,6 +182,7 @@ cargo run -- --load-flow /tmp/rural.json --simplified
 cargo run -- --apply base.json modification.json resultat.json
 cargo run -- --reference-case four-wire /tmp/quatre-conducteurs.json
 cargo run -- --load-flow examples/reference-transformer.json
+cargo run -- --unbalanced-load-flow examples/reference-unbalanced-bt.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -194,10 +211,13 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Étendre les cas de validation et les moteurs aux réseaux maillés,
-  au régime déséquilibré et aux courts-circuits.
+- Étendre le calcul déséquilibré aux transformateurs et aux terres distribuées,
+  puis couvrir les réseaux maillés et les courts-circuits.
+- Ajouter le catalogue versionné de technologies de câbles/lignes et de
+  transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents
   et un éditeur unifilaire complet.
 - Ajouter cas d'étude, annuler/rétablir, persistance des résultats, rapports et
   conditionnement compressé des échanges.
+- Consacrer une phase aux parcours et à l'ergonomie de l'éditeur géographique.
 - Vérifier l'application native et préparer les distributions Windows/Linux.

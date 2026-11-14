@@ -4,6 +4,79 @@ use calcelec::{
 };
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
+#[derive(Clone, Copy)]
+pub enum MapResults<'a> {
+    Balanced(&'a calcelec::load_flow::LoadFlow),
+    Unbalanced(&'a calcelec::unbalanced::LoadFlow),
+}
+impl MapResults<'_> {
+    fn overloaded(self, id: Id) -> bool {
+        match self {
+            Self::Balanced(r) => r
+                .branches
+                .iter()
+                .any(|b| b.id == id && b.loading_percent.is_some_and(|p| p > 100.0)),
+            Self::Unbalanced(r) => r
+                .branches
+                .iter()
+                .any(|b| b.id == id && b.loading_percent.is_some_and(|p| p > 100.0)),
+        }
+    }
+    fn outside(self, id: Id) -> bool {
+        match self {
+            Self::Balanced(r) => r
+                .buses
+                .iter()
+                .any(|b| b.id == id && b.outside_voltage_limits),
+            Self::Unbalanced(r) => r
+                .buses
+                .iter()
+                .any(|b| b.id == id && b.phase_neutral.iter().any(|p| p.outside_voltage_limits)),
+        }
+    }
+    fn value(self, id: Id) -> Option<String> {
+        match self {
+            Self::Balanced(r) => r
+                .buses
+                .iter()
+                .find(|b| b.id == id)
+                .map(|b| format!("{:.2} V ({:.4} pu)", b.voltage_ll_v, b.voltage_pu))
+                .or_else(|| {
+                    r.branches.iter().find(|b| b.id == id).map(|b| {
+                        format!(
+                            "{:.2} A amont / {:.2} A aval",
+                            b.current_from_a, b.current_to_a
+                        )
+                    })
+                }),
+            Self::Unbalanced(r) => r
+                .buses
+                .iter()
+                .find(|b| b.id == id)
+                .map(|b| {
+                    format!(
+                        "A-N {:.2} V · B-N {:.2} V · C-N {:.2} V · VN {:.3} V",
+                        b.phase_neutral[0].magnitude_v,
+                        b.phase_neutral[1].magnitude_v,
+                        b.phase_neutral[2].magnitude_v,
+                        b.neutral_displacement_v
+                    )
+                })
+                .or_else(|| {
+                    r.branches.iter().find(|b| b.id == id).map(|b| {
+                        format!(
+                            "IA {:.2} A · IB {:.2} A · IC {:.2} A · IN {:.2} A",
+                            b.currents_a[0].magnitude(),
+                            b.currents_a[1].magnitude(),
+                            b.currents_a[2].magnitude(),
+                            b.currents_a[3].magnitude()
+                        )
+                    })
+                }),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum MapMode {
     #[default]
@@ -110,7 +183,7 @@ impl MapView {
         ui: &mut egui::Ui,
         network: &Network,
         selected: Option<Id>,
-        results: Option<&calcelec::load_flow::LoadFlow>,
+        results: Option<MapResults<'_>>,
         tools: MapTools<'_>,
     ) -> Option<MapEvent> {
         if self.mode != tools.mode {
@@ -291,12 +364,7 @@ impl MapView {
                     Color32::from_rgb(245, 160, 85)
                 }
             };
-            let color = if Some(o.id) != selected
-                && results.is_some_and(|r| {
-                    r.branches
-                        .iter()
-                        .any(|b| b.id == o.id && b.loading_percent.is_some_and(|p| p > 100.0))
-                }) {
+            let color = if Some(o.id) != selected && results.is_some_and(|r| r.overloaded(o.id)) {
                 Color32::LIGHT_RED
             } else {
                 color
@@ -345,14 +413,8 @@ impl MapView {
                 Color32::from_rgb(95, 220, 190)
             };
             let color = if Some(o.id) != selected
-                && results.is_some_and(|r| {
-                    r.buses
-                        .iter()
-                        .any(|b| b.id == o.id && b.outside_voltage_limits)
-                        || r.branches
-                            .iter()
-                            .any(|b| b.id == o.id && b.loading_percent.is_some_and(|p| p > 100.0))
-                }) {
+                && results.is_some_and(|r| r.outside(o.id) || r.overloaded(o.id))
+            {
                 Color32::LIGHT_RED
             } else {
                 color
@@ -385,21 +447,10 @@ impl MapView {
                 .iter()
                 .map(|(_, id)| {
                     let name = &network.objects[id].name;
-                    if let Some(bus) = results.and_then(|r| r.buses.iter().find(|b| b.id == *id)) {
-                        format!(
-                            "{name} · {:.2} V ({:.4} pu)",
-                            bus.voltage_ll_v, bus.voltage_pu
-                        )
-                    } else if let Some(branch) =
-                        results.and_then(|r| r.branches.iter().find(|b| b.id == *id))
-                    {
-                        format!(
-                            "{name} · {:.2} A amont / {:.2} A aval",
-                            branch.current_from_a, branch.current_to_a
-                        )
-                    } else {
-                        name.clone()
-                    }
+                    results
+                        .and_then(|r| r.value(*id))
+                        .map(|value| format!("{name} · {value}"))
+                        .unwrap_or_else(|| name.clone())
                 })
                 .collect::<Vec<_>>()
                 .join("\n");

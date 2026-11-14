@@ -170,7 +170,11 @@ Un premier export de résultats de régime permanent existe séparément du proj
 Il inclut les identifiants du projet et de sa version, la version du moteur,
 les options, les hypothèses et les grandeurs calculées. Il ne modifie pas le
 schéma 4 du réseau et n'est pas encore persisté dans SQLite. Voir le
-[contrat du moteur](calcul-regime-permanent.md).
+[contrat du moteur équilibré](calcul-regime-permanent.md).
+Le résultat du [moteur déséquilibré](calcul-desequilibre.md) utilise la même
+traçabilité avec ses propres options et son `solver_version`. Il exporte des
+phaseurs et des tableaux A/B/C/N, des tensions phase-neutre et composées,
+le potentiel du neutre et U2/U1. Le schéma de réseau reste inchangé.
 
 - Pas encore d'empreinte cryptographique, de signature ou d'authentification :
   les UUID identifient les versions mais ne certifient pas leur contenu.
