@@ -220,4 +220,6 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 - Ajouter cas d'étude, annuler/rétablir, persistance des résultats, rapports et
   conditionnement compressé des échanges.
 - Consacrer une phase aux parcours et à l'ergonomie de l'éditeur géographique.
+- Proposer le français et l'anglais, avec choix de langue mémorisé, traduction
+  de l'interface, des diagnostics et des rapports ; le prototype reste actuellement en français.
 - Vérifier l'application native et préparer les distributions Windows/Linux.

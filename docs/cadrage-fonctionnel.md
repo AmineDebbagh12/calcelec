@@ -198,6 +198,30 @@ la conformité : celle-ci demande un périmètre défini et une validation dédi
   options, hypothèses et version du moteur.
 - Fonctionnement local hors ligne, sans compte obligatoire.
 
+### Langues et traduction
+
+La V1 doit être disponible au minimum en **français et en anglais**. La
+traduction complète et sa vérification sont prévues vers la fin de réalisation,
+avec la phase d'ergonomie ; les textes devront être séparés progressivement
+du code et des données pour préparer ce travail.
+
+- Choix de langue dans les paramètres de l'application, mémorisé localement.
+- Traduction des menus, outils, propriétés, aides, messages de validation et
+  erreurs, tableaux de résultats et libellés des rapports générés.
+- Terminologie électrique cohérente entre langues, avec un glossaire métier.
+- Formats numériques d'affichage et de saisie cohérents avec la langue choisie ;
+  unités physiques et précision des données conservées.
+- Identifiants, clés des formats d'échange, codes d'erreur structurés et valeurs
+  sérialisées indépendants de la langue. Changer de langue ne crée pas une
+  nouvelle version du réseau et ne modifie pas les résultats numériques.
+- Noms d'ouvrages, références de technologies et commentaires saisis par les
+  utilisateurs conservés tels quels, sans traduction automatique.
+- Vérification des deux langues sous Windows et Linux : absence de textes
+  manquants, libellés lisibles et parcours d'édition utilisables dans les deux cas.
+
+Le prototype actuel reste en français ; cet ajout fixe le périmètre de la V1,
+sans implémenter immédiatement le système de traduction.
+
 ### Ergonomie de l'édition géographique
 
 Prévoir une phase dédiée en fin de réalisation V1, avec essais sur les parcours
@@ -355,7 +379,7 @@ et l'éditeur unifilaire complet restent à réaliser pour le jalon d'interface 
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Défauts supportés validés, cas min/max et contributions vérifiés |
 | E — Application V1 | Éditeur, cas d'étude, résultats et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
-| F — Ergonomie et livraison | Édition géographique affinée et distributions | Parcours métier testés avec des utilisateurs cibles ; corrections d'ergonomie et essais natifs Windows/Linux |
+| F — Ergonomie, langues et livraison | Édition géographique affinée, français/anglais et distributions | Parcours métier testés avec des utilisateurs cibles dans les deux langues ; corrections d'ergonomie et essais natifs Windows/Linux |
 
 Pour le contrat de données, vérifier aussi les échanges entre deux projets locaux,
 la réception répétée d'un lot, les variantes concurrentes et la sauvegarde puis
@@ -377,7 +401,7 @@ non supporté et non-convergence.
 4. Grandeurs de court-circuit nécessaires au-delà de I''k et ip ?
 5. Réseaux de référence disponibles et possibilités de comparaison indépendante ?
 6. Taille typique des réseaux et temps de calcul acceptable ?
-7. Distribution et licence du logiciel, langues de l'interface et formats d'échange prioritaires ?
+7. Distribution et licence du logiciel, formats d'échange prioritaires et éventuelles langues supplémentaires au-delà du français et de l'anglais ?
 8. Granularité de l'historique : enregistrement explicite d'un lot, fréquence des
    instantanés et présentation des différences à l'utilisateur ?
 
