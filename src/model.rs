@@ -1,3 +1,4 @@
+use crate::geometry::{Coordinate, CoordinateReference, Geometry};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -78,6 +79,8 @@ pub struct Object {
     pub name: String,
     pub in_service: bool,
     pub equipment: Equipment,
+    #[serde(default)]
+    pub geometry: Geometry,
 }
 
 impl Object {
@@ -87,6 +90,7 @@ impl Object {
             name: name.into(),
             in_service: true,
             equipment,
+            geometry: Geometry::Unlocated,
         }
     }
     pub fn kind(&self) -> &'static str {
@@ -126,6 +130,8 @@ impl Object {
 pub struct Network {
     pub name: String,
     pub frequency_hz: f64,
+    #[serde(default)]
+    pub coordinate_reference: CoordinateReference,
     pub objects: BTreeMap<Id, Object>,
 }
 
@@ -144,6 +150,23 @@ impl Network {
         }
         positive(self.frequency_hz, "fréquence")?;
         for (id, object) in &self.objects {
+            object.geometry.validate()?;
+            match (&object.equipment, &object.geometry) {
+                (_, Geometry::Unlocated) | (Equipment::Line { .. }, Geometry::Polyline(_)) => {}
+                (Equipment::Line { .. }, _) => {
+                    return Err(Error::Invalid(format!(
+                        "{} : un tronçon doit avoir une polyligne",
+                        object.name
+                    )));
+                }
+                (_, Geometry::Point(_)) => {}
+                _ => {
+                    return Err(Error::Invalid(format!(
+                        "{} : cet équipement doit avoir une géométrie ponctuelle",
+                        object.name
+                    )));
+                }
+            }
             if *id != object.id || id.is_nil() || object.name.trim().is_empty() {
                 return Err(Error::Invalid(format!("identité ou nom invalide : {id}")));
             }
@@ -365,9 +388,52 @@ pub fn rural_example() -> Network {
         }
         previous = hta;
     }
+    // Fictional local survey: no association with an actual Enedis network.
+    // Both voltage-level buses and transformer at each station are co-located.
+    let mut locations = BTreeMap::new();
+    locations.insert(source, Coordinate(0.0, 0.0));
+    for object in objects.values() {
+        if matches!(object.equipment, Equipment::Bus { .. }) && object.id != source {
+            let point = if object.name == "Extrémité départ BT" {
+                Coordinate(1370.0, 320.0)
+            } else if object.name.contains("rural 1") {
+                Coordinate(1200.0, 400.0)
+            } else if object.name.contains("rural 2") {
+                Coordinate(2500.0, -200.0)
+            } else {
+                Coordinate(3800.0, 500.0)
+            };
+            locations.insert(object.id, point);
+        }
+    }
+    let mut charge_index = 0;
+    for object in objects.values_mut() {
+        object.geometry = match object.equipment {
+            Equipment::Bus { .. } => Geometry::Point(locations[&object.id]),
+            Equipment::Line { from, to, .. } => {
+                let a = locations[&from];
+                let b = locations[&to];
+                Geometry::Polyline(vec![
+                    a,
+                    Coordinate((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0 + 60.0),
+                    b,
+                ])
+            }
+            Equipment::Transformer { from, .. } | Equipment::Switch { from, .. } => {
+                Geometry::Point(locations[&from])
+            }
+            Equipment::Source { bus, .. } => Geometry::Point(locations[&bus]),
+            Equipment::Load { bus, .. } | Equipment::Generator { bus, .. } => {
+                charge_index += 1;
+                let a = locations[&bus];
+                Geometry::Point(Coordinate(a.0 + 30.0 * charge_index as f64, a.1 - 50.0))
+            }
+        };
+    }
     Network {
         name: "Exemple rural France — HTA / BT".into(),
         frequency_hz: 50.0,
+        coordinate_reference: CoordinateReference::LocalMeters,
         objects,
     }
 }

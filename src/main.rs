@@ -1,4 +1,5 @@
 mod desktop;
+mod desktop_geo;
 
 use calcelec::{
     model::{Result, rural_example},

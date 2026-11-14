@@ -163,7 +163,7 @@ fn non_finite_power_and_unsupported_schema_are_rejected() {
     let mut encoded = serde_json::to_value(&p).unwrap();
     encoded["schema_version"] = 99.into();
     assert!(Project::from_json(&encoded.to_string()).is_err());
-    encoded["schema_version"] = 1.into();
+    encoded["schema_version"] = calcelec::project::SCHEMA_VERSION.into();
     encoded["unexpected"] = true.into();
     assert!(Project::from_json(&encoded.to_string()).is_err());
 }

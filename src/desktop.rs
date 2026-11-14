@@ -1,3 +1,5 @@
+use crate::desktop_geo::MapView;
+use calcelec::geometry::{Coordinate, Geometry};
 use calcelec::{
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
@@ -10,6 +12,9 @@ pub struct Desktop {
     project: Project,
     network: Network,
     selected: Option<Id>,
+    geometry: Geometry,
+    geographic: bool,
+    map: MapView,
     name: String,
     service: bool,
     p_kw: f64,
@@ -30,6 +35,9 @@ impl Desktop {
             project: Project::new(network.clone()).expect("valid built-in example"),
             network,
             selected: None,
+            geometry: Geometry::Unlocated,
+            geographic: true,
+            map: MapView::default(),
             name: String::new(),
             service: true,
             p_kw: 0.0,
@@ -53,6 +61,7 @@ impl Desktop {
         let object = &self.network.objects[&id];
         self.selected = Some(id);
         self.name = object.name.clone();
+        self.geometry = object.geometry.clone();
         self.service = object.in_service;
         let (p, q) = object.power().unwrap_or_default();
         self.p_kw = p / 1000.0;
@@ -96,6 +105,12 @@ impl Desktop {
                 q_var: self.q_kvar * 1000.0,
             });
         }
+        if self.geometry != object.geometry {
+            operations.push(Operation::SetGeometry {
+                id,
+                geometry: self.geometry.clone(),
+            });
+        }
         if operations.is_empty() {
             return Ok("Aucune propriété modifiée.".into());
         }
@@ -121,6 +136,7 @@ impl Desktop {
             }
             if ui.button("Ouvrir").clicked() {
                 let result = storage::read_project(&self.file_path).and_then(|project| {
+                    self.map.reset();
                     self.project = project;
                     self.selected = None;
                     self.refresh()?;
@@ -176,6 +192,7 @@ impl Desktop {
                 let result = Store::open(&self.database_path)
                     .and_then(|db| db.load(self.project.id))
                     .and_then(|project| {
+                        self.map.reset();
                         self.project = project;
                         self.refresh()?;
                         Ok("Projet relu depuis SQLite.".into())
@@ -205,6 +222,7 @@ impl Desktop {
             let result = Store::open(&self.database_path)
                 .and_then(|db| db.load(id))
                 .and_then(|project| {
+                    self.map.reset();
                     self.project = project;
                     self.selected = None;
                     self.refresh()?;
@@ -239,6 +257,7 @@ impl Desktop {
                     "P positive : consommation pour une charge, injection pour un producteur.",
                 );
             }
+            self.geometry_editor(ui, &object);
             ui.collapsing("Paramètres du modèle (SI)", |ui| {
                 ui.monospace(serde_json::to_string_pretty(&object.equipment).unwrap_or_default());
             });
@@ -260,6 +279,82 @@ impl Desktop {
         } else {
             ui.label("Sélectionnez un objet dans le tableau ou le schéma.");
         }
+    }
+    fn geometry_editor(&mut self, ui: &mut egui::Ui, object: &calcelec::model::Object) {
+        ui.separator();
+        ui.label("Géométrie géographique");
+        ui.small(self.network.coordinate_reference.label());
+        let mut remove = None;
+        match &mut self.geometry {
+            Geometry::Unlocated => {
+                ui.label("Objet non localisé");
+                if ui.button("Initialiser une géométrie").clicked() {
+                    self.geometry = if matches!(object.equipment, Equipment::Line { .. }) {
+                        Geometry::Polyline(vec![Coordinate(0.0, 0.0), Coordinate(10.0, 0.0)])
+                    } else {
+                        Geometry::Point(Coordinate(0.0, 0.0))
+                    };
+                }
+            }
+            Geometry::Point(point) => {
+                ui.horizontal(|ui| {
+                    ui.label("X (m)");
+                    ui.add(
+                        egui::DragValue::new(&mut point.0)
+                            .speed(1.0)
+                            .max_decimals(2),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Y (m)");
+                    ui.add(
+                        egui::DragValue::new(&mut point.1)
+                            .speed(1.0)
+                            .max_decimals(2),
+                    );
+                });
+            }
+            Geometry::Polyline(points) => {
+                ui.label("Sommets : X / Y en mètres");
+                let can_remove = points.len() > 2;
+                for (index, point) in points.iter_mut().enumerate() {
+                    ui.push_id(index, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}", index + 1));
+                            ui.add(
+                                egui::DragValue::new(&mut point.0)
+                                    .speed(1.0)
+                                    .max_decimals(2),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut point.1)
+                                    .speed(1.0)
+                                    .max_decimals(2),
+                            );
+                            if ui.add_enabled(can_remove, egui::Button::new("−")).clicked() {
+                                remove = Some(index);
+                            }
+                        });
+                    });
+                }
+                if let Some(index) = remove {
+                    points.remove(index);
+                }
+                if ui.button("Ajouter un sommet").clicked() {
+                    let last = points.last().copied().unwrap_or(Coordinate(0.0, 0.0));
+                    points.push(Coordinate(last.0 + 10.0, last.1));
+                }
+            }
+        }
+        if let Some(length) = self.geometry.length_m() {
+            ui.small(format!("Longueur du tracé : {length:.1} m"));
+            if let Equipment::Line { length_m, .. } = object.equipment {
+                ui.small(format!(
+                    "Longueur électrique renseignée : {length_m:.1} m (indépendante du tracé)"
+                ));
+            }
+        }
+        ui.small("Validez les coordonnées en créant une version. La géométrie ne change pas les raccordements.");
     }
     fn diagram(&mut self, ui: &mut egui::Ui) {
         let (rect, _) =
@@ -418,7 +513,17 @@ impl Desktop {
                 });
             });
         egui::CentralPanel::default().show(ui, |ui| {
-            self.diagram(ui);
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.geographic, true, "Vue géographique");
+                ui.selectable_value(&mut self.geographic, false, "Vue topologique");
+            });
+            if self.geographic {
+                if let Some(id) = self.map.show(ui, &self.network, self.selected) {
+                    self.select(id);
+                }
+            } else {
+                self.diagram(ui);
+            }
             ui.label(format!(
                 "Connectivité : {} jeux de barres en service sans source accessible",
                 self.network.unpowered_buses().len()
@@ -503,6 +608,9 @@ mod tests {
             |ui| app.render(ui),
         );
         assert!(!output.shapes.is_empty());
+        output.textures_delta.clear();
+        app.geographic = false;
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| app.render(ui));
         output.textures_delta.clear();
     }
 }

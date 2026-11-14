@@ -1,8 +1,9 @@
+use crate::geometry::Geometry;
 use crate::model::{Equipment, Error, Id, Network, Object, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -13,6 +14,7 @@ pub enum Operation {
     SetService { id: Id, in_service: bool },
     SetPower { id: Id, p_w: f64, q_var: f64 },
     SetSwitch { id: Id, closed: bool },
+    SetGeometry { id: Id, geometry: Geometry },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -38,6 +40,19 @@ pub struct Project {
     pub changes: Vec<ChangeSet>,
 }
 
+impl ChangeSet {
+    pub(crate) fn migrate(mut self) -> Result<Self> {
+        if self.schema_version == 1 {
+            if self.operations.iter().any(|op| matches!(op, Operation::SetGeometry { .. }) || matches!(op, Operation::Create { object } if object.geometry != Geometry::Unlocated)) {
+                return Err(Error::Invalid("géométrie interdite dans un lot de schéma 1".into()));
+            }
+            self.schema_version = SCHEMA_VERSION;
+        }
+        supported(self.schema_version)?;
+        Ok(self)
+    }
+}
+
 fn supported(version: u32) -> Result<()> {
     if version != SCHEMA_VERSION {
         return Err(Error::Invalid(format!("schéma {version} non supporté")));
@@ -46,6 +61,31 @@ fn supported(version: u32) -> Result<()> {
 }
 
 impl Project {
+    /// Upgrade representation without changing object, batch or network-version IDs.
+    pub(crate) fn migrate(mut self) -> Result<Self> {
+        if self.schema_version == 1 {
+            if self.root.coordinate_reference != crate::geometry::CoordinateReference::LocalMeters
+                || self
+                    .root
+                    .objects
+                    .values()
+                    .any(|o| o.geometry != Geometry::Unlocated)
+            {
+                return Err(Error::Invalid(
+                    "géométrie interdite dans un projet de schéma 1".into(),
+                ));
+            }
+            self.schema_version = SCHEMA_VERSION;
+        }
+        supported(self.schema_version)?;
+        self.changes = self
+            .changes
+            .into_iter()
+            .map(ChangeSet::migrate)
+            .collect::<Result<_>>()?;
+        self.network()?;
+        Ok(self)
+    }
     pub fn new(root: Network) -> Result<Self> {
         root.validate()?;
         Ok(Self {
@@ -95,6 +135,7 @@ impl Project {
     }
     /// Returns false for an identical batch already received. On failure self is unchanged.
     pub fn apply(&mut self, change: ChangeSet) -> Result<bool> {
+        let change = change.migrate()?;
         let mut network = self.network()?;
         if let Some(existing) = self.changes.iter().find(|c| c.id == change.id) {
             return if existing == &change {
@@ -119,8 +160,7 @@ impl Project {
     }
     pub fn from_json(json: &str) -> Result<Self> {
         let project: Self = serde_json::from_str(json)?;
-        project.network()?;
-        Ok(project)
+        project.migrate()
     }
     pub fn to_json(&self) -> Result<String> {
         self.network()?;
@@ -163,6 +203,7 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
             | Operation::SetService { id, .. }
             | Operation::SetPower { id, .. }
             | Operation::SetSwitch { id, .. } => id,
+            Operation::SetGeometry { id, .. } => id,
             Operation::Create { .. } => unreachable!(),
         };
         let object = network
@@ -174,6 +215,7 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
                 network.objects.remove(id);
             }
             Operation::Rename { name, .. } => object.name = name.clone(),
+            Operation::SetGeometry { geometry, .. } => object.geometry = geometry.clone(),
             Operation::SetService { in_service, .. } => object.in_service = *in_service,
             Operation::SetPower { p_w, q_var, .. } => match &mut object.equipment {
                 Equipment::Load {

@@ -24,6 +24,10 @@ Le format des objets et des modifications du réseau doit être compact,
 documenté, facilement partageable et compatible avec un stockage en base de
 données pour échanger des versions et des modifications.
 
+La **représentation géographique** fait partie de la V1 : chaque objet porte
+une géométrie, ponctuelle pour les postes et équipements ponctuels, et une
+polyligne pour les tronçons. La vue géographique complète la vue unifilaire.
+
 PowerFactory constitue une référence de catégories de fonctionnalités, sans
 objectif de reproduire son étendue dès la première version.
 
@@ -142,6 +146,20 @@ la conformité : celle-ci demande un périmètre défini et une validation dédi
 
 ### Interface et gestion des études
 
+- Vue géographique : tracé réel des tronçons, position des postes, zoom,
+  déplacement et sélection synchronisée avec les propriétés et le tableau.
+- Coordonnées dans un référentiel explicite ; repère métrique local pour les
+  exemples synthétiques et prise en charge initiale de Lambert-93 pour les
+  données géoréférencées. Aucune reprojection implicite.
+- Géométries persistées et versionnées, avec opérations de modification des
+  coordonnées et des sommets. Un objet non encore localisé doit être signalé
+  explicitement, sans position fictive inventée à l'import.
+- Distinguer topologie électrique, géométrie géographique et disposition du
+  schéma unifilaire. Un croisement de tracés ne crée pas une connexion.
+- Distinguer longueur géométrique du tracé et longueur électrique renseignée ;
+  toute éventuelle mise en cohérence doit être une action explicite et traçable.
+- Fond de carte facultatif : la consultation et l'édition du réseau doivent
+  fonctionner hors ligne sans service externe.
 - Éditeur de schéma unifilaire : ajouter, relier, déplacer, supprimer, zoomer.
 - Inspecteur des propriétés avec unités et validation des saisies.
 - Repérage des phases et du neutre dans les propriétés des raccordements.
@@ -240,7 +258,8 @@ il doit recevoir un conflit exploitable, sans modification partielle du réseau.
 | Échanges et automatisation | Formats externes choisis selon les utilisateurs, API et calculs par lots |
 
 Sont également reportés : optimisation économique, estimation d'état,
-cartographie SIG, collaboration multiutilisateur en temps réel, hébergement du
+fonds de carte externes, reprojections et échanges SIG avancés,
+collaboration multiutilisateur en temps réel, hébergement du
 service distant de partage et import natif PowerFactory. Les échanges de versions
 et de modifications par fichiers et le contrat de persistance sont inclus en V1.
 Un réseau comportant plusieurs tensions sera possible dès la V1 ; cela ne

@@ -89,7 +89,7 @@ impl Store {
         for json in statement.query_map([id.to_string()], |r| r.get::<_, String>(0))? {
             project.changes.push(serde_json::from_str(&json?)?);
         }
-        project.network()?;
+        project = project.migrate()?;
         let head: String = transaction.query_row(
             "SELECT head FROM projects WHERE id=?1",
             [id.to_string()],
@@ -116,9 +116,9 @@ impl Store {
             )
             .optional()?;
         if let Some((schema, root_version, root)) = stored {
-            if schema != SCHEMA_VERSION
+            if ![1, SCHEMA_VERSION].contains(&schema)
                 || root_version != project.root_version.to_string()
-                || root != serde_json::to_string(&project.root)?
+                || serde_json::from_str::<crate::model::Network>(&root)? != project.root
             {
                 return Err(Error::Conflict(
                     "racine du projet différente de la base".into(),
@@ -148,9 +148,16 @@ impl Store {
             ));
         }
         for (position, json) in saved.iter().enumerate() {
-            let change: ChangeSet = serde_json::from_str(json)?;
+            let change = serde_json::from_str::<ChangeSet>(json)?.migrate()?;
             if change != project.changes[position] {
                 return Err(Error::Conflict("historique concurrent en base".into()));
+            }
+            let canonical = serde_json::to_string(&change)?;
+            if canonical != *json {
+                transaction.execute(
+                    "UPDATE changes SET json=?1 WHERE project_id=?2 AND position=?3",
+                    params![canonical, project.id.to_string(), position as i64],
+                )?;
             }
         }
         for (position, change) in project.changes.iter().enumerate().skip(saved.len()) {
@@ -165,8 +172,13 @@ impl Store {
             )?;
         }
         transaction.execute(
-            "UPDATE projects SET head=?1 WHERE id=?2",
-            params![project.head().to_string(), project.id.to_string()],
+            "UPDATE projects SET head=?1,schema_version=?3,root_json=?4 WHERE id=?2",
+            params![
+                project.head().to_string(),
+                project.id.to_string(),
+                project.schema_version,
+                serde_json::to_string(&project.root)?
+            ],
         )?;
         transaction.commit()?;
         Ok(())
