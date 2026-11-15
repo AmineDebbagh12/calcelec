@@ -178,9 +178,12 @@ le potentiel du neutre et U2/U1. La version de moteur `radial-four-wire-0.2`
 ajoute les prises de terre (`groundings`) et sépare pertes des lignes et des terres.
 La version `radial-four-wire-0.3` ajoute les conducteurs présents sur chaque bus,
 les courants amont/aval de branche et les pertes propres aux transformateurs.
+La version `radial-four-wire-0.4` conserve ces champs et étend leur sémantique
+aux zones de terre séparées par les Dyn : chaque ancrage publie son courant de
+compensation, opposé à la somme des électrodes de sa zone.
 Le champ historique `currents_a` conserve le courant côté aval. Les lecteurs de
-résultats doivent tenir compte de la version du moteur : le type 0.3 exige les
-nouveaux champs, sans valeur inventée à la lecture d'un ancien rapport. Le schéma
+résultats doivent tenir compte de la version du moteur : le type 0.3 et les
+suivants exigent les nouveaux champs, sans valeur inventée à la lecture d'un ancien rapport. Le schéma
 de réseau reste inchangé en version 4 ; les anciennes déclarations de terres,
 auparavant refusées au calcul, sont maintenant exploitées dans le domaine pris
 en charge.

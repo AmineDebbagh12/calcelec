@@ -1,17 +1,21 @@
-//! Exact neutral-ground compensation for a radial conductor tree, on a common earth reference.
+//! Exact neutral-ground compensation for independent galvanic zones in a radial tree.
 use super::{Edge, check_cancel, unsupported};
 use crate::{complex::C, load_flow::Result};
+use std::collections::BTreeSet;
 use std::sync::atomic::AtomicBool;
 
 const MAX_GROUNDINGS: usize = 256;
 pub(super) struct GroundSystem {
     pub nodes: Vec<usize>,
     pub impedances: Vec<C>,
+    pub anchors: Vec<usize>,
+    pub electrode_anchors: Vec<usize>,
     factor: Option<ComplexLu>,
 }
 impl GroundSystem {
     pub fn build(
         earth: Vec<(usize, C)>,
+        anchors: BTreeSet<usize>,
         edges: &[Edge],
         parent: &[Option<(usize, usize)>],
         cancel: &AtomicBool,
@@ -22,32 +26,49 @@ impl GroundSystem {
             )));
         }
         let mut paths = vec![];
+        let mut electrode_anchors = vec![];
         for &(node, _) in &earth {
             let mut path = vec![];
             let mut cursor = node;
-            while let Some((p, e)) = parent[cursor] {
+            while !anchors.contains(&cursor) {
                 check_cancel(cancel)?;
+                let Some((p, e)) = parent[cursor] else {
+                    return Err(unsupported(
+                        "prise de terre sans ancrage de neutre accessible dans sa zone galvanique",
+                    ));
+                };
+                if edges[e].transformer() {
+                    return Err(unsupported(
+                        "frontière de transformateur rencontrée avant l'ancrage de la zone de terre",
+                    ));
+                }
                 path.push(e);
                 cursor = p;
             }
             path.reverse();
             paths.push(path);
+            electrode_anchors.push(cursor);
         }
         let mut matrix = vec![vec![C::default(); earth.len()]; earth.len()];
         for (i, row) in matrix.iter_mut().enumerate() {
             check_cancel(cancel)?;
             for (j, value) in row.iter_mut().enumerate() {
-                let common = paths[i]
-                    .iter()
-                    .zip(&paths[j])
-                    .take_while(|(a, b)| a == b)
-                    .try_fold(C::default(), |sum, (e, _)| {
-                        edges[*e].neutral_impedance().map(|z| sum + z).ok_or_else(|| {
-                            unsupported(
-                                "une prise de terre aval ne peut pas traverser une frontière de transformateur dans ce jalon",
-                            )
-                        })
-                    })?;
+                let common =
+                    if electrode_anchors[i] == electrode_anchors[j] {
+                        paths[i]
+                            .iter()
+                            .zip(&paths[j])
+                            .take_while(|(a, b)| a == b)
+                            .try_fold(C::default(), |sum, (e, _)| {
+                                edges[*e].neutral_impedance().map(|z| sum + z).ok_or_else(|| {
+                                unsupported(
+                                    "branche sans impédance de neutre dans une zone de terre",
+                                )
+                            })
+                            })?
+                    } else {
+                        C::default()
+                    };
                 *value = common + if i == j { earth[i].1 } else { C::default() };
             }
         }
@@ -59,6 +80,8 @@ impl GroundSystem {
         Ok(Self {
             nodes: earth.iter().map(|(i, _)| *i).collect(),
             impedances: earth.iter().map(|(_, z)| *z).collect(),
+            anchors: anchors.into_iter().collect(),
+            electrode_anchors,
             factor,
         })
     }
@@ -157,6 +180,62 @@ impl ComplexLu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Id;
+
+    fn line_edge(a: usize, b: usize, neutral: f64) -> Edge {
+        let mut z = [[C::default(); 4]; 4];
+        z[3][3] = C::new(neutral, 0.0);
+        Edge {
+            id: Id::new_v4(),
+            a,
+            b,
+            model: super::super::EdgeModel::Line(z),
+            current_limits: None,
+        }
+    }
+
+    fn transformer_edge(a: usize, b: usize) -> Edge {
+        Edge {
+            id: Id::new_v4(),
+            a,
+            b,
+            model: super::super::EdgeModel::Dyn {
+                ratio: 1.0,
+                shift: C::new(1.0, 0.0),
+                z_positive_to_ohm: C::default(),
+                z_zero_to_ohm: C::default(),
+            },
+            current_limits: None,
+        }
+    }
+
+    #[test]
+    fn distinct_transformer_zones_form_independent_grounding_blocks() {
+        let edges = vec![
+            transformer_edge(0, 1),
+            transformer_edge(0, 2),
+            line_edge(1, 3, 0.1),
+            line_edge(2, 4, 0.2),
+        ];
+        let parent = vec![None, Some((0, 0)), Some((0, 1)), Some((1, 2)), Some((2, 3))];
+        let anchors = BTreeSet::from([1, 2]);
+        let cancel = AtomicBool::new(false);
+        let system = GroundSystem::build(
+            vec![(3, C::new(1.0, 0.0)), (4, C::new(2.0, 0.0))],
+            anchors,
+            &edges,
+            &parent,
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(system.electrode_anchors, vec![1, 2]);
+        let currents = system
+            .currents(&[C::new(11.0, 0.0), C::new(22.0, 0.0)], &cancel)
+            .unwrap();
+        assert!((currents[0].re - 10.0).abs() < 1e-12);
+        assert!((currents[1].re - 10.0).abs() < 1e-12);
+    }
+
     #[test]
     fn scaled_complex_lu_pivots_and_recovers_a_known_solution() {
         let matrix = vec![

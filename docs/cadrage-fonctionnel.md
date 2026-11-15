@@ -193,6 +193,24 @@ la conformité : celle-ci demande un périmètre défini et une validation dédi
   leurs propriétés électriques, de charge ou d'état, et afficher les résultats.
   Les raccordements, positions et tracés globaux se modifient exclusivement
   depuis la vue géographique puis sont répercutés dans l'unifilaire.
+- Organisation visuelle inspirée du principe présenté pour **Erable**, surcouche
+  Enedis de PowerFactory, sans objectif de reproduction à l'identique : la vue
+  géographique montre les câbles/lignes, organes de coupure et postes ; un poste
+  ou ouvrage complexe peut ouvrir un **monde interne** contenant ses objets
+  techniques, représentés localement en unifilaire.
+- Conserver trois niveaux distincts : géométrie géographique externe, unifilaire
+  global dérivé de cette géométrie et de la topologie, puis unifilaire local du
+  monde interne. Modifier l'agencement interne ne déplace jamais le poste sur la
+  carte et modifier la carte ne change pas silencieusement sa topologie interne.
+- Les objets internes portent un rattachement explicite et versionné à leur
+  conteneur (poste, tableau ou ouvrage complexe). Le passage carte → poste →
+  monde interne conserve la sélection et fournit un fil d'Ariane. Les frontières
+  électriques entre monde externe et interne utilisent des bornes identifiées,
+  sans connexion implicite fondée sur la seule proximité graphique.
+- Le premier rendu interne pourra être calculé depuis la connectivité. Si des
+  ajustements locaux de présentation deviennent nécessaires, ils resteront des
+  métadonnées schématiques propres au monde interne, sans devenir une seconde
+  géométrie géographique du réseau.
 - Inspecteur des propriétés avec unités et validation des saisies.
 - Repérage des phases et du neutre dans les propriétés des raccordements.
 - Annuler/rétablir les modifications de modèle.
@@ -252,6 +270,7 @@ de base de données.
 | Concept | Informations et comportement attendus |
 | --- | --- |
 | Objet réseau | Identifiant stable et unique, type explicite, propriétés typées, références aux autres objets par identifiant |
+| Monde interne | Conteneur identifié, objets techniques rattachés par identifiant et bornes de frontière explicites vers le réseau externe ; aucune duplication de l'ouvrage entre les deux niveaux |
 | Instantané | État complet d'une version du réseau, avec les données nécessaires à sa reconstruction |
 | Modification | Création, mise à jour de propriétés ou suppression d'un objet identifié |
 | Lot de modifications | Identifiant unique, version de base, opérations ordonnées, auteur déclaré et message ; application atomique |
@@ -274,6 +293,10 @@ par une version immuable pour permettre de reconstruire un ancien calcul.
   imposer le transfert complet du réseau à chaque changement.
 - Séparer données électriques, présentation graphique et résultats pour
   partager le modèle seul ou un projet complet selon le besoin.
+- Représenter le rattachement des mondes internes dans le modèle métier, pas
+  seulement dans l'interface. Un delta peut modifier un objet interne ou une
+  borne de frontière sans recopier tout le poste ; les références invalides et
+  cycles de conteneurs sont rejetés atomiquement.
 - Un export autonome doit inclure les dépendances nécessaires, notamment les
   paramètres de catalogue, ou signaler explicitement qu'il s'agit d'un delta
   nécessitant une version de base.
@@ -366,14 +389,15 @@ avec deux cas synthétiques à solution analytique. Le moteur équilibré exploi
 les matrices symétriques et les pertes cuivre dans son domaine actuel.
 Un premier moteur déséquilibré ABC/ABCN couvre désormais les départs radiaux
 avec source équivalente secondaire, neutre explicite et prises de terre aval
-sur une référence de terre commune. Il franchit aussi un transformateur Dyn
+sur une référence équipotentielle propre à chaque zone galvanique. Il franchit aussi un transformateur Dyn
 HTA/BT à secondaire directement mis à la terre, en appliquant rapport, prise
 fixe, déphasage, impédances directe/inverse et homopolaire. Les courants et pertes
 des lignes, transformateurs et terres sont séparés.
 Il est validé par des solutions analytiques monophasées et par comparaison au
-moteur équilibré sur un cas symétrique. Les autres couplages de transformateurs,
-les terres BT multi-zones derrière un poste, la mise à la terre source par une
-impédance non nulle, les modèles de sol détaillés, les calculs maillés et les
+moteur équilibré sur un cas symétrique. Les terres BT sont désormais découpées
+en zones galvaniques ancrées à la source ou au secondaire Dyn. Les autres
+couplages de transformateurs, la mise à la terre source par une impédance non
+nulle, les modèles de sol détaillés, les calculs maillés et les
 courts-circuits restent à développer.
 Voir le [premier jalon ABCN](calcul-desequilibre.md) pour ses limites précises.
 Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventions
@@ -384,18 +408,47 @@ Une première vue unifilaire dérivée est disponible : ses colonnes suivent la
 connectivité et son ordre vertical l'agencement géographique ; elle partage la
 sélection et l'inspecteur mais verrouille la géométrie. Le déplacement groupé
 des postes et l'ajustement automatique des tracés incidents restent à réaliser
-pour le jalon d'interface V1.
+pour le jalon d'interface V1. La navigation dans les mondes internes des postes,
+leurs frontières électriques et leur vue unifilaire locale sont ajoutées au
+périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le format.
 
-| Jalon | Livrable | Critère de sortie |
+| Jalon | Livrable | État / critère de sortie |
 | --- | --- | --- |
-| A — Spécification numérique | Modèles, conventions et cas de référence | Entrées, hypothèses, résultats attendus et tolérances définis pour chaque cas |
-| A bis — Contrat de données | Objets, instantanés, versions et lots documentés | Aller-retour sans perte ; reconstruction de B depuis A et son delta ; conflits et références invalides rejetés atomiquement |
-| B — Régime permanent équilibré | Moteur utilisable sans interface | Cas simples et maillés validés ; bilans de puissance et erreurs contrôlés |
-| C — Distribution déséquilibrée | Phases, neutre et transformateurs | Cas monophasés et triphasés déséquilibrés validés avec chemins de retour |
+| A — Spécification numérique | Modèles, conventions et cas de référence | Socle établi ; à compléter pour chaque nouveau calcul avec résultats attendus et tolérances |
+| A bis — Contrat de données | Objets, instantanés, versions et lots documentés | Socle opérationnel ; compacité et montée en charge encore à mesurer |
+| B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; cas maillés et validation indépendante restant à couvrir |
+| C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial, terres multi-zones et premier Dyn disponibles ; autres couplages, neutre source impédant et mailles à compléter |
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Défauts supportés validés, cas min/max et contributions vérifiés |
-| E — Application V1 | Éditeur, cas d'étude, résultats et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
+| E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
+| E ter — Vues réseau et mondes internes | Carte externe, unifilaire global dérivé et unifilaires locaux des postes | Navigation sans ambiguïté, rattachements et bornes persistés, aucune divergence silencieuse entre géographie externe et contenu interne |
 | F — Ergonomie, langues et livraison | Édition géographique affinée, français/anglais et distributions | Parcours métier testés avec des utilisateurs cibles dans les deux langues ; corrections d'ergonomie et essais natifs Windows/Linux |
+
+### Ordre proposé des prochains jalons
+
+1. **Achever C — modèle déséquilibré de distribution** : neutre source impédant,
+   autres couplages réellement requis,
+   puis cas rural HTA/BT complet avec comparaison indépendante.
+2. **Achever B/C — topologies d'exploitation** : calcul des réseaux maillés dans
+   le domaine retenu, îlots et configurations avec points de coupure, sans
+   confondre une maille dessinée et une maille effectivement fermée.
+3. **Réaliser D — courts-circuits** : figer l'édition et le sous-ensemble IEC
+   60909, développer défauts triphasés, biphasés et à la terre, cas min/max,
+   contributions et cas analytiques HTA/BT.
+4. **Réaliser E bis — catalogue technologique** : types versionnés de câbles,
+   lignes et transformateurs, instanciation explicite, variantes locales et
+   mise à jour contrôlée sans modifier les études historiques.
+5. **Compléter E — études et restitutions** : cas de charge/production, comparaison
+   avant-après, états de coupure, persistance des résultats, exports CSV et rapport.
+6. **Réaliser E ter — mondes internes** : ajouter le modèle de conteneur et ses
+   bornes, puis la navigation carte → poste → unifilaire interne et le retour
+   synchronisé vers la carte, selon l'inspiration fonctionnelle d'Erable.
+7. **Finaliser F — usage et livraison** : formulaires métier, ergonomie géographique,
+   français/anglais, performances, essais natifs et paquets Windows/Linux.
+
+Cet ordre pourra faire avancer en parallèle le catalogue et les maquettes de
+mondes internes, mais les calculs de défaut doivent rester prioritaires pour
+atteindre la promesse fonctionnelle de la V1.
 
 Pour le contrat de données, vérifier aussi les échanges entre deux projets locaux,
 la réception répétée d'un lot, les variantes concurrentes et la sauvegarde puis

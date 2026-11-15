@@ -252,6 +252,60 @@ pub fn dyn_transformer() -> Network {
     n
 }
 
+/// Synthetic Dyn11 case followed by a four-wire BT cable and a terminal earth electrode.
+pub fn dyn_grounded_transformer() -> Network {
+    let mut n = dyn_transformer();
+    n.name = "Référence synthétique — Dyn11 avec terre BT aval".into();
+    let secondary = n
+        .objects
+        .values()
+        .find(|object| object.name == "Secondaire 400 V")
+        .unwrap()
+        .id;
+    let client = object(
+        "Client BT avec terre",
+        Equipment::Bus { voltage_v: 400.0 },
+        ElectricalData::Bus(BusData {
+            conductors: vec![Conductor::A, Conductor::B, Conductor::C, Conductor::N],
+            neutral_grounding: Grounding::Impedance {
+                ohm: Impedance { r: 1.0, x: 0.0 },
+            },
+        }),
+        Coordinate(50.0, 0.0),
+    );
+    let client_id = client.id;
+    let line_data = four_wire()
+        .objects
+        .into_values()
+        .find_map(|object| match object.electrical {
+            Some(ElectricalData::Line(data)) => Some(data),
+            _ => None,
+        })
+        .unwrap();
+    let mut line = object(
+        "Câble BT ABCN — 50 m",
+        Equipment::Line {
+            from: secondary,
+            to: client_id,
+            length_m: 50.0,
+            r_ohm_per_km: 0.38,
+            x_ohm_per_km: 0.06,
+            max_current_a: 150.0,
+        },
+        ElectricalData::Line(line_data),
+        Coordinate(0.0, 0.0),
+    );
+    line.geometry = Geometry::Polyline(vec![Coordinate(0.0, 0.0), Coordinate(50.0, 0.0)]);
+    for object in n.objects.values_mut() {
+        if let Equipment::Load { bus, .. } = &mut object.equipment {
+            *bus = client_id;
+        }
+    }
+    n.objects.insert(line.id, line);
+    n.objects.insert(client.id, client);
+    n
+}
+
 /// Synthetic BT feeder with distinct single-phase loads and a single-phase PV injection.
 pub fn unbalanced_bt() -> Network {
     let mut n = four_wire();

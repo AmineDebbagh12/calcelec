@@ -608,7 +608,7 @@ impl Desktop {
             }
         });
         if self.use_unbalanced {
-            ui.small("ABC/ABCN radial : lignes quatre fils et transformateurs Dyn HTA/BT à neutre secondaire directement mis à la terre. Exemples : reference-grounded-bt.json et reference-dyn-transformer.json.");
+            ui.small("ABC/ABCN radial : lignes quatre fils, zones de terre et transformateurs Dyn HTA/BT. Exemples : reference-grounded-bt.json et reference-dyn-grounded.json.");
         } else if self.simplified_calculation {
             ui.small("Hypothèses : équivalents équilibrés des charges monophasées ; transformateurs purement réactifs, rapport nominal, sans déphasage. Aucun calcul du neutre.");
         }
@@ -749,7 +749,7 @@ impl Desktop {
             });
         ui.separator();
         ui.strong("Prises de terre du neutre");
-        ui.small("Courant positif du neutre vers la référence de terre commune ; angles relatifs à la phase A source.");
+        ui.small("Courant positif du neutre vers la référence de terre de sa zone galvanique ; angles relatifs à la phase A source.");
         egui::Grid::new("neutral_groundings")
             .striped(true)
             .show(ui, |ui| {

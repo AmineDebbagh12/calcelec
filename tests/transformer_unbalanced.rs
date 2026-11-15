@@ -292,47 +292,61 @@ fn unsupported_transformer_models_are_rejected_explicitly() {
     };
     data.zero_sequence_ohm_referred_from = Some(Impedance::ZERO);
     assert!(unbalanced::solve(&network, &Options::default()).is_ok());
+}
 
-    let mut network = reference_cases::dyn_transformer();
+#[test]
+fn downstream_grounding_is_solved_inside_the_dyn_galvanic_zone() {
+    let network = reference_cases::dyn_grounded_transformer();
     let secondary = network
         .objects
         .values()
         .find(|object| object.name == "Secondaire 400 V")
         .unwrap()
         .id;
-    let template = reference_cases::four_wire()
+    let downstream_id = network
         .objects
-        .into_values()
-        .find(|object| matches!(object.equipment, Equipment::Line { .. }))
+        .values()
+        .find(|object| object.name == "Client BT avec terre")
+        .unwrap()
+        .id;
+    let result = unbalanced::solve(&network, &Options::default()).unwrap();
+    let electrode = result
+        .groundings
+        .iter()
+        .find(|ground| ground.bus_id == downstream_id)
         .unwrap();
-    let mut downstream = Object::new(
-        "Bus BT aval avec terre",
-        Equipment::Bus { voltage_v: 400.0 },
+    let anchor = result
+        .groundings
+        .iter()
+        .find(|ground| ground.bus_id == secondary)
+        .unwrap();
+    near(
+        electrode.current_to_earth_a.re + anchor.current_to_earth_a.re,
+        0.0,
+        1e-9,
     );
-    downstream.geometry = Geometry::Point(Coordinate(50.0, 0.0));
-    downstream.electrical = Some(ElectricalData::Bus(BusData {
-        conductors: vec![Conductor::A, Conductor::B, Conductor::C, Conductor::N],
-        neutral_grounding: Grounding::Impedance {
-            ohm: Impedance { r: 1.0, x: 0.0 },
-        },
-    }));
-    let mut line = Object::new(
-        "Câble BT aval",
-        Equipment::Line {
-            from: secondary,
-            to: downstream.id,
-            length_m: 50.0,
-            r_ohm_per_km: 0.38,
-            x_ohm_per_km: 0.06,
-            max_current_a: 150.0,
-        },
+    near(
+        electrode.current_to_earth_a.im + anchor.current_to_earth_a.im,
+        0.0,
+        1e-9,
     );
-    line.geometry = Geometry::Polyline(vec![Coordinate(0.0, 0.0), Coordinate(50.0, 0.0)]);
-    line.electrical = template.electrical;
-    network.objects.insert(downstream.id, downstream);
-    network.objects.insert(line.id, line);
-    assert!(matches!(
-        unbalanced::solve(&network, &Options::default()),
-        Err(CalculationError::Unsupported(message)) if message.contains("multi-zones")
-    ));
+    near(
+        electrode.voltage_v.re,
+        electrode.current_to_earth_a.re,
+        1e-8,
+    );
+    near(
+        electrode.voltage_v.im,
+        electrode.current_to_earth_a.im,
+        1e-8,
+    );
+    near(anchor.voltage_v.magnitude(), 0.0, 1e-12);
+    assert!(electrode.current_to_earth_a.magnitude() > 0.1);
+    assert!(result.grounding_loss_w > 0.0);
+    near(
+        result.grounding_loss_w,
+        electrode.current_to_earth_a.magnitude().powi(2),
+        1e-8,
+    );
+    assert!(result.balance_error_va < 1e-3);
 }

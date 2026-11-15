@@ -161,13 +161,14 @@ aux matrices et aux enroulements restent à améliorer.
 
 ## Cas de référence et validation
 
-Trois projets autonomes ciblent les modèles détaillés dans `examples/` :
+Quatre projets autonomes ciblent les modèles détaillés dans `examples/` :
 
 | Cas | Modèle et contrôle analytique |
 | --- | --- |
 | `reference-four-wire.json` | Ligne ABCN de 100 m, matrice 4×4 réciproque et passive ; réduction directe 0,38 + j0,06 ohm/km ; charge triphasée 30 kW ; solution analytique complexe à deux nœuds |
 | `reference-transformer.json` | Transformateur Yyn0 20 kV/400 V, 100 kVA, uk 4 %, pertes cuivre assignées 1 kW, excitation explicitement nulle ; charge 30 kW + j9 kvar ; solution analytique par l'impédance série ramenée au secondaire |
 | `reference-dyn-transformer.json` | Transformateur Dyn11 20 kV/400 V avec trois charges monophasées différentes ; rapport, déphasage, séquences directe/inverse/homopolaire, courants des deux côtés et pertes vérifiés |
+| `reference-dyn-grounded.json` | Même Dyn11 suivi d'un câble ABCN de 50 m et d'une prise de terre terminale ; courant d'électrode, compensation au point étoile, tensions et pertes vérifiés dans la zone BT |
 
 Ces valeurs sont synthétiques et ne décrivent pas des ouvrages Enedis types.
 Les tests vérifient tensions, angles, courants et pertes face aux solutions
@@ -177,7 +178,7 @@ les migrations et les échanges/annulations/stockages des modifications détaill
 Le moteur déséquilibré exploite les matrices ABCN et un premier modèle Dyn HTA/BT
 sur des départs radiaux, avec neutre BT explicitement représenté ; voir le
 [jalon déséquilibré](calcul-desequilibre.md). Son extension aux autres couplages,
-aux terres multi-zones, au neutre source non directement à la terre et aux modèles de sol détaillés,
+au neutre source non directement à la terre et aux modèles de sol détaillés,
 la comparaison à des outils indépendants et la validation
 normative des calculs de courts-circuits restent à réaliser.
 

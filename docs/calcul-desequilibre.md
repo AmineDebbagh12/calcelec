@@ -1,6 +1,6 @@
 # Régime permanent déséquilibré — réseau radial ABC/ABCN
 
-Moteur : `radial-four-wire-0.3`, dans `src/unbalanced.rs`.
+Moteur : `radial-four-wire-0.4`, dans `src/unbalanced.rs`.
 Il couvre les réseaux radiaux BT à quatre conducteurs et un premier franchissement
 HTA/BT Dyn depuis un réseau amont ABC alimenté par une source équilibrée idéale.
 Le neutre BT est représenté sans élimination, avec ses impédances propres et ses
@@ -31,9 +31,8 @@ Ce jalon est une première partie du moteur HTA/BT déséquilibré prévu pour l
 La présence de matrices est obligatoire : le moteur ne reconstruit pas une
 impédance de neutre depuis les seuls R/X du modèle historique.
 Les phases manquantes, les tronçons monophasés, impédances de terre non nulles
-à la source, sources multiples, points étoile flottants, shunts non nuls, autres
-couplages de transformateurs et prises de terre supplémentaires derrière un Dyn
-ne sont pas encore pris en charge.
+à la source, sources multiples, points étoile flottants, shunts non nuls et autres
+couplages de transformateurs ne sont pas encore pris en charge.
 Ils sont refusés explicitement. Les objets hors service et les branchements
 à des bus hors service sont exclus du calcul, comme pour le moteur équilibré.
 
@@ -42,8 +41,9 @@ l'équivalent source du secondaire. Le modèle Dyn permet sinon de partir du bus
 HTA amont. Les impédances de séquence de la source et les contributions
 au défaut sont conservées comme données mais ne sont pas utilisées ici.
 Les harmoniques, courants de fuite et potentiels locaux du sol ne sont pas
-calculés. Les courants de retour par les impédances de terre déclarées sont
-calculés vers une référence commune, sans couplage entre électrodes. Le modèle
+calculés. Dans chaque zone galvanique, les courants de retour par les impédances
+de terre déclarées sont calculés vers une référence équipotentielle, sans
+couplage entre électrodes ni entre zones. Le modèle
 ne remplace pas une représentation détaillée du sol ou des noyaux magnétiques.
 
 ## Conventions numériques
@@ -91,7 +91,7 @@ les [conventions OpenDSS / EPRI](https://opendss.epri.com/NeutralRules.html).
 L'implémentation et les validations de CalcElec sont propres au projet ; aucune
 comparaison numérique avec ces outils n'a encore été effectuée.
 
-## Transformateur Dyn — extension 0.3
+## Transformateur Dyn — extensions 0.3 et 0.4
 
 Le côté BT est ramené en composantes symétriques. Avec `a = exp(j120°)`, les
 composantes sont calculées explicitement depuis A/B/C. Le rapport `r` inclut la
@@ -114,11 +114,11 @@ HTA divisée par `r²`. Le triangle bloque le courant homopolaire dans les ligne
 HTA ; le modèle conserve son effet sur les tensions et pertes BT. Les courants
 des deux enroulements sont donc distincts et exportés séparément.
 
-Le secondaire constitue dans ce jalon une frontière de terre idéale avec
-`VN = 0`. Le courant de neutre métallique rejoint le point étoile ; il ne doit
-pas être confondu avec un courant d'électrode. Les prises de terre supplémentaires
-en aval sont refusées tant que la résolution des terres n'est pas découpée en
-zones séparées par les transformateurs.
+Le secondaire constitue une frontière de terre idéale avec `VN = 0`. Le courant
+de neutre métallique rejoint le point étoile ; il ne doit pas être confondu avec
+un courant d'électrode. Depuis la version 0.4, les prises de terre supplémentaires
+en aval sont résolues dans une zone galvanique ancrée à ce point étoile. Leurs
+courants de neutre s'arrêtent à cet ancrage et ne traversent jamais le delta.
 
 Le modèle reste un équivalent de séquences : pas de saturation, excitation,
 couplage magnétique détaillé du noyau ni harmoniques. Le rôle du delta dans le
@@ -127,12 +127,13 @@ blocage homopolaire et l'importance des données de noyau sont documentés par l
 et sa note sur les [effets de noyau](https://opendss.epri.com/ModelingTransformerCoreEffectsin.html).
 CalcElec ne revendique pas une équivalence complète avec ce modèle nodal général.
 
-## Prises de terre du neutre — extension 0.2
+## Prises de terre du neutre — extensions 0.2 et 0.4
 
 Les prises de terre aval sont connectées à une **référence de terre commune
-équipotentielle**. Chacune porte son impédance complexe déclarée, avec R non
-négative et X signée. La source garde une liaison idéale du neutre à cette
-référence. Les impédances et potentiels propres au sol entre électrodes,
+équipotentielle dans leur zone galvanique**. Chacune porte son impédance complexe
+déclarée, avec R non négative et X signée. La source ou le point étoile Dyn garde
+une liaison idéale du neutre à cette référence. Les impédances et potentiels
+propres au sol entre électrodes,
 les tensions de contact et les couplages entre électrodes ne sont pas modélisés.
 La tension VN publiée est relative à la référence commune, pas une mesure du
 potentiel du sol local.
@@ -142,10 +143,15 @@ exactement avant le balayage suivant. Soit V⁰ la tension sans les courants
 supplémentaires des terres, et g le vecteur des courants du neutre vers la terre :
 
 ```text
-H[i,j] = somme des Z[N,N] sur le chemin commun source→i et source→j
+H[i,j] = somme des Z[N,N] sur le chemin commun ancrage→i et ancrage→j
 (diag(Zterre) + H) × g = V⁰neutre
 Vneutre[i] = Zterre[i] × g[i]
 ```
+
+Chaque électrode est affectée à l'ancrage idéal le plus proche en remontant le
+réseau : neutre de la source ou point étoile d'un Dyn. Les termes `H[i,j]` sont
+nuls entre deux zones différentes. La matrice globale est donc formée de blocs
+galvaniquement indépendants, même si elle est factorisée en une seule opération.
 
 Cette relation conserve les couplages phase-neutre : les quatre tensions sont
 recalculées avec la matrice complète après ajout des courants g dans les
@@ -164,9 +170,9 @@ Les contrôles de valeurs finies, de conditions de terre et d'annulation restent
 actifs. Le solveur dense de ce jalon accepte au plus **256 prises de terre aval** ;
 il ne s'agit pas d'une taille maximale annoncée pour la V1.
 
-Le courant de la prise de terre idéale à la source est l'opposé de la somme des
-courants des prises aval. Il ferme le bilan des courants de terre, avec une
-puissance dissipée nulle à la source puisque VNsource = 0.
+Le courant de chaque ancrage idéal est l'opposé de la somme des courants des
+prises aval de sa zone. Il ferme localement le bilan des courants de terre, avec
+une puissance dissipée nulle puisque `VN = 0` à l'ancrage.
 Les impédances des terres aval consomment `Zterre × |g|²` : cette puissance est
 incluse dans le bilan global, séparément des pertes des lignes. Une réactance
 capacitive peut fournir une puissance réactive, qui reste signée dans le résultat.
@@ -205,6 +211,8 @@ lecteurs existants. Les champs `total_loss_w/var` sont les sommes lignes +
 transformateurs + terres. Les flux de
 branche restent ceux des conducteurs métalliques ; le courant de terre peut
 ainsi être différent du courant du conducteur N.
+La version 0.4 conserve le format et publie, dans `groundings`, chaque ancrage
+de zone avec `VN = 0` et le courant opposé à la somme de ses électrodes.
 
 Le taux de charge d'une ligne est le maximum des modules de courant rapporté à
 `max_current_a`. Celui d'un transformateur est le maximum des taux des phases
@@ -265,6 +273,23 @@ des lignes HTA et leur conducteur N restent nuls ; le bilan est inférieur à
 0,001 VA. Le cas à vide vérifie séparément 400/sqrt(3) V et le déphasage +30°.
 Les valeurs sont destinées à la validation logicielle, pas à un catalogue Enedis.
 
+## Exemple Dyn11 avec terre BT aval
+
+Ouvrir `examples/reference-dyn-grounded.json` pour tester le franchissement
+HTA/BT et la zone de terre secondaire dans un même calcul. Le Dyn11 est suivi
+d'un câble ABCN de 50 m et d'une terre terminale synthétique de 1 ohm.
+
+```sh
+cargo run -- --unbalanced-load-flow examples/reference-dyn-grounded.json
+cargo run -- --reference-case dyn-grounded nouveau-projet.json
+```
+
+Le calcul initial converge en 5 itérations. Le courant de l'électrode vaut
+environ 1,042 A et son potentiel de neutre 1,042 V ; le point étoile publie le
+courant exactement opposé avec `VN = 0`. Les pertes sont proches de 114,212 W
+dans la ligne, 72,819 W dans le transformateur et 1,086 W dans la terre. L'erreur
+de bilan reste inférieure à 0,001 VA.
+
 ## Exemple avec terres intermédiaire et terminale
 
 Ouvrir `examples/reference-grounded-bt.json`, conserver **Déséquilibré ABCN**
@@ -289,6 +314,8 @@ neutre/terre à sa solution analytique complexe, puis deux prises de terre à le
 équivalent parallèle résistif. Ils vérifient aussi le neutre fixé idéalement,
 les connexions idéales redondantes, les impédances capacitives, les lois de
 Kirchhoff avec couplages mutuels, la séparation des pertes et l'affichage des
-résultats. Les autres couplages de transformateurs, les terres BT multi-zones,
-le neutre source raccordé par une impédance non nulle et le modèle de sol détaillé
+résultats. Un test matriciel vérifie aussi que deux zones séparées forment des
+blocs indépendants, et le cas Dyn vérifie les lois de Kirchhoff et les pertes.
+Les autres couplages de transformateurs, le neutre source raccordé par une
+impédance non nulle et le modèle de sol détaillé
 restent des extensions à réaliser.

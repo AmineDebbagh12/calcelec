@@ -106,10 +106,12 @@ version. Les structures préremplies sont provisoires et doivent être vérifié
 Les données inconnues des anciens projets restent absentes ; l'application les
 signale dans **Données détaillées** et la commande `--check`.
 
-Trois cas synthétiques sont notamment fournis :
+Quatre cas synthétiques sont notamment fournis :
 [ligne quatre conducteurs](examples/reference-four-wire.json) et
 [transformateur équilibré avec pertes cuivre](examples/reference-transformer.json),
 ainsi qu'un [transformateur Dyn11 déséquilibré](examples/reference-dyn-transformer.json).
+Le cas [Dyn11 avec câble et terre BT aval](examples/reference-dyn-grounded.json)
+vérifie en plus la séparation des zones galvaniques de terre.
 Ils se calculent sans les options de simplification. Le moteur exploite leurs
 matrices et résistances ; le moteur déséquilibré applique aussi le rapport, la
 prise fixe, le déphasage horaire et l'impédance homopolaire du cas Dyn pris en charge.
@@ -154,12 +156,15 @@ du neutre, le déséquilibre U2/U1 et les pertes. Les résultats sont exportable
 avec leur version et leurs hypothèses.
 
 Ce jalon accepte les départs radiaux BT à tension unique, avec neutre directement
-à la terre à la source et des prises de terre aval sur une référence commune.
+à la terre à la source et des prises de terre aval sur une référence commune à
+leur zone galvanique.
 Le tableau **Prises de terre du neutre** distingue leurs courants, potentiels
 et pertes. Il accepte également un franchissement HTA/BT Dyn : bus HTA ABC,
 secondaire étoile ABCN directement mis à la terre, excitation nulle et impédance
-homopolaire déclarée. Les autres couplages, les prises de terre supplémentaires
-derrière ce transformateur, les shunts, phases manquantes et points étoile
+homopolaire déclarée. Les prises de terre supplémentaires derrière ce
+transformateur sont résolues dans une zone galvanique ancrée à son point étoile,
+sans faire traverser le triangle au courant de neutre. Les autres couplages,
+les shunts, phases manquantes et points étoile
 flottants restent refusés. L'exemple rural complet reste donc à calculer avec
 le moteur équilibré simplifié ; il ne doit pas être converti implicitement.
 Un deuxième exemple, `examples/reference-grounded-bt.json`, ajoute des terres
@@ -169,6 +174,8 @@ Le modèle ne décrit pas les potentiels locaux du sol ni les couplages entre
 électrodes. Voir le [domaine et les validations du moteur déséquilibré](docs/calcul-desequilibre.md).
 Le cas `examples/reference-dyn-transformer.json` vérifie un Dyn11 20 kV/400 V
 alimentant trois charges monophasées différentes.
+Le cas `examples/reference-dyn-grounded.json` ajoute un câble ABCN de 50 m et
+une terre terminale de 1 ohm ; son courant est compensé à l'ancrage du Dyn.
 
 ## Partager une modification
 
@@ -200,6 +207,7 @@ cargo run -- --load-flow examples/reference-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-unbalanced-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-grounded-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-dyn-transformer.json
+cargo run -- --unbalanced-load-flow examples/reference-dyn-grounded.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -228,13 +236,16 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Étendre le calcul déséquilibré aux autres couplages de transformateurs, aux
-  terres BT multi-zones, au neutre source non directement à la terre et aux
+- Étendre le calcul déséquilibré aux autres couplages de transformateurs, au
+  neutre source non directement à la terre et aux
   modèles de sol plus détaillés, puis couvrir les réseaux maillés et les courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents
-  et un éditeur unifilaire complet.
+  et affiner la vue unifilaire globale dérivée.
+- Ajouter une navigation inspirée du principe d'Erable : carte des câbles,
+  interrupteurs et postes, puis ouverture d'un monde interne unifilaire pour les
+  objets techniques d'un poste, sans géométrie globale indépendante.
 - Ajouter cas d'étude, annuler/rétablir, persistance des résultats, rapports et
   conditionnement compressé des échanges.
 - Consacrer une phase aux parcours et à l'ergonomie de l'éditeur géographique.
