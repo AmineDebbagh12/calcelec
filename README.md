@@ -106,12 +106,14 @@ version. Les structures préremplies sont provisoires et doivent être vérifié
 Les données inconnues des anciens projets restent absentes ; l'application les
 signale dans **Données détaillées** et la commande `--check`.
 
-Quatre cas synthétiques sont notamment fournis :
+Cinq cas synthétiques sont notamment fournis :
 [ligne quatre conducteurs](examples/reference-four-wire.json) et
 [transformateur équilibré avec pertes cuivre](examples/reference-transformer.json),
 ainsi qu'un [transformateur Dyn11 déséquilibré](examples/reference-dyn-transformer.json).
 Le cas [Dyn11 avec câble et terre BT aval](examples/reference-dyn-grounded.json)
 vérifie en plus la séparation des zones galvaniques de terre.
+Le cas [BT avec terre source impédante](examples/reference-source-grounded-bt.json)
+vérifie le potentiel et les pertes de l'ancrage source.
 Ils se calculent sans les options de simplification. Le moteur exploite leurs
 matrices et résistances ; le moteur déséquilibré applique aussi le rapport, la
 prise fixe, le déphasage horaire et l'impédance homopolaire du cas Dyn pris en charge.
@@ -155,9 +157,10 @@ Il présente les tensions et angles par phase, les courants A/B/C/N, le potentie
 du neutre, le déséquilibre U2/U1 et les pertes. Les résultats sont exportables
 avec leur version et leurs hypothèses.
 
-Ce jalon accepte les départs radiaux BT à tension unique, avec neutre directement
-à la terre à la source et des prises de terre aval sur une référence commune à
-leur zone galvanique.
+Ce jalon accepte les départs radiaux BT à tension unique, avec neutre source
+raccordé à la terre directement ou par une impédance complexe, et des prises de
+terre aval sur une référence commune à leur zone galvanique. L'impédance source
+doit être identique dans les données du bus et de la source.
 Le tableau **Prises de terre du neutre** distingue leurs courants, potentiels
 et pertes. Il accepte également un franchissement HTA/BT Dyn : bus HTA ABC,
 secondaire étoile ABCN directement mis à la terre, excitation nulle et impédance
@@ -170,6 +173,8 @@ le moteur équilibré simplifié ; il ne doit pas être converti implicitement.
 Un deuxième exemple, `examples/reference-grounded-bt.json`, ajoute des terres
 intermédiaire et terminale. Il conserve les mêmes commandes et le même mode de
 calcul ; les pertes totales incluent désormais lignes et prises de terre.
+Le cas `examples/reference-source-grounded-bt.json` ajoute une résistance de
+terre source de 0,2 ohm et publie son déplacement de neutre et ses pertes.
 Le modèle ne décrit pas les potentiels locaux du sol ni les couplages entre
 électrodes. Voir le [domaine et les validations du moteur déséquilibré](docs/calcul-desequilibre.md).
 Le cas `examples/reference-dyn-transformer.json` vérifie un Dyn11 20 kV/400 V
@@ -208,6 +213,7 @@ cargo run -- --unbalanced-load-flow examples/reference-unbalanced-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-grounded-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-dyn-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-dyn-grounded.json
+cargo run -- --unbalanced-load-flow examples/reference-source-grounded-bt.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -236,9 +242,9 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Étendre le calcul déséquilibré aux autres couplages de transformateurs, au
-  neutre source non directement à la terre et aux
-  modèles de sol plus détaillés, puis couvrir les réseaux maillés et les courts-circuits.
+- Étendre le calcul déséquilibré aux autres couplages de transformateurs et aux
+  modèles de sol plus détaillés, puis couvrir les réseaux maillés et les
+  courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

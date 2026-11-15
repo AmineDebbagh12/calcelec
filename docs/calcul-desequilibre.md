@@ -1,6 +1,6 @@
 # Régime permanent déséquilibré — réseau radial ABC/ABCN
 
-Moteur : `radial-four-wire-0.4`, dans `src/unbalanced.rs`.
+Moteur : `radial-four-wire-0.5`, dans `src/unbalanced.rs`.
 Il couvre les réseaux radiaux BT à quatre conducteurs et un premier franchissement
 HTA/BT Dyn depuis un réseau amont ABC alimenté par une source équilibrée idéale.
 Le neutre BT est représenté sans élimination, avec ses impédances propres et ses
@@ -11,8 +11,10 @@ Ce jalon est une première partie du moteur HTA/BT déséquilibré prévu pour l
 
 - Données détaillées A/B/C ou A/B/C/N sur tous les jeux de barres et branches actifs ;
   les conducteurs d'une ligne ou d'un interrupteur correspondent à ses deux bus.
-- Source active unique. Sur une frontière BT ABCN, son neutre est directement
-  mis à la terre ; sur le côté HTA ABC, aucun conducteur N n'est inventé.
+- Source active unique. Sur une frontière BT ABCN, son neutre est raccordé à la
+  terre directement ou par une impédance complexe ; la déclaration du bus et
+  celle de la source doivent être identiques. Sur le côté HTA ABC, aucun
+  conducteur N n'est inventé.
 - Aux autres bus, `isolated` signifie aucune prise de terre locale : leur
   conducteur N reste connecté au neutre amont par les tronçons. Une déclaration
   `impedance` ajoute une prise de terre, éventuellement idéale (R = X = 0).
@@ -30,8 +32,8 @@ Ce jalon est une première partie du moteur HTA/BT déséquilibré prévu pour l
 
 La présence de matrices est obligatoire : le moteur ne reconstruit pas une
 impédance de neutre depuis les seuls R/X du modèle historique.
-Les phases manquantes, les tronçons monophasés, impédances de terre non nulles
-à la source, sources multiples, points étoile flottants, shunts non nuls et autres
+Les phases manquantes, les tronçons monophasés, sources multiples, points étoile
+flottants, shunts non nuls et autres
 couplages de transformateurs ne sont pas encore pris en charge.
 Ils sont refusés explicitement. Les objets hors service et les branchements
 à des bus hors service sont exclus du calcul, comme pour le moteur équilibré.
@@ -53,7 +55,8 @@ L'ordre interne et l'ordre des tableaux exportés sont **A, B, C, N**. Une matri
 stockée dans un autre ordre est réordonnée avec ses coefficients ; aucune phase
 n'est permutée physiquement.
 
-Les tensions des conducteurs sont référencées à la terre source. Les tensions
+Les tensions des conducteurs sont référencées à la terre équipotentielle de leur
+zone. Les tensions
 qui alimentent les injections sont les différences entre leurs bornes :
 
 ```text
@@ -66,8 +69,10 @@ La puissance des injections triphasées est un total : chaque élément étoile
 ou triangle reçoit un tiers de P/Q. Une production est comptée négativement dans
 la demande nette. Aucun regroupement équilibré des charges monophasées n'est fait.
 
-La source impose les angles A = 0°, B = −120°, C = +120° et VN = 0. Sa tension
-phase-neutre est `Unominale_composée × voltage_pu / sqrt(3)`. Les résultats par
+La source impose les angles A = 0°, B = −120°, C = +120° autour de son neutre.
+Sa tension phase-neutre est `Unominale_composée × voltage_pu / sqrt(3)`. Avec
+une terre source impédante, les quatre potentiels de la source sont translatés
+par VN sans modifier ces tensions composées ou phase-neutre. Les résultats par
 phase en pu utilisent `Unominale_composée / sqrt(3)` comme base.
 
 Le moteur utilise un balayage arrière/avant par sommation des courants :
@@ -127,12 +132,12 @@ blocage homopolaire et l'importance des données de noyau sont documentés par l
 et sa note sur les [effets de noyau](https://opendss.epri.com/ModelingTransformerCoreEffectsin.html).
 CalcElec ne revendique pas une équivalence complète avec ce modèle nodal général.
 
-## Prises de terre du neutre — extensions 0.2 et 0.4
+## Prises de terre du neutre — extensions 0.2, 0.4 et 0.5
 
 Les prises de terre aval sont connectées à une **référence de terre commune
 équipotentielle dans leur zone galvanique**. Chacune porte son impédance complexe
-déclarée, avec R non négative et X signée. La source ou le point étoile Dyn garde
-une liaison idéale du neutre à cette référence. Les impédances et potentiels
+déclarée, avec R non négative et X signée. Le point étoile Dyn garde une liaison
+idéale ; l'ancrage source utilise son impédance déclarée. Les impédances et potentiels
 propres au sol entre électrodes,
 les tensions de contact et les couplages entre électrodes ne sont pas modélisés.
 La tension VN publiée est relative à la référence commune, pas une mesure du
@@ -143,13 +148,14 @@ exactement avant le balayage suivant. Soit V⁰ la tension sans les courants
 supplémentaires des terres, et g le vecteur des courants du neutre vers la terre :
 
 ```text
-H[i,j] = somme des Z[N,N] sur le chemin commun ancrage→i et ancrage→j
+H[i,j] = Zancrage + somme des Z[N,N] sur le chemin commun ancrage→i et ancrage→j
 (diag(Zterre) + H) × g = V⁰neutre
 Vneutre[i] = Zterre[i] × g[i]
 ```
 
-Chaque électrode est affectée à l'ancrage idéal le plus proche en remontant le
-réseau : neutre de la source ou point étoile d'un Dyn. Les termes `H[i,j]` sont
+Chaque électrode est affectée à l'ancrage le plus proche en remontant le réseau :
+neutre de la source, éventuellement impédant, ou point étoile idéal d'un Dyn.
+Les termes `H[i,j]` sont
 nuls entre deux zones différentes. La matrice globale est donc formée de blocs
 galvaniquement indépendants, même si elle est factorisée en une seule opération.
 
@@ -170,9 +176,10 @@ Les contrôles de valeurs finies, de conditions de terre et d'annulation restent
 actifs. Le solveur dense de ce jalon accepte au plus **256 prises de terre aval** ;
 il ne s'agit pas d'une taille maximale annoncée pour la V1.
 
-Le courant de chaque ancrage idéal est l'opposé de la somme des courants des
-prises aval de sa zone. Il ferme localement le bilan des courants de terre, avec
-une puissance dissipée nulle puisque `VN = 0` à l'ancrage.
+Le courant de chaque ancrage est l'opposé de la somme des courants des prises
+aval de sa zone. Il ferme localement le bilan des courants de terre. Un ancrage
+source impédant vérifie `VN = Zancrage × Iancrage` et sa puissance est incluse
+dans les pertes ; un point étoile Dyn idéal conserve `VN = 0` et des pertes nulles.
 Les impédances des terres aval consomment `Zterre × |g|²` : cette puissance est
 incluse dans le bilan global, séparément des pertes des lignes. Une réactance
 capacitive peut fournir une puissance réactive, qui reste signée dans le résultat.
@@ -213,6 +220,8 @@ branche restent ceux des conducteurs métalliques ; le courant de terre peut
 ainsi être différent du courant du conducteur N.
 La version 0.4 conserve le format et publie, dans `groundings`, chaque ancrage
 de zone avec `VN = 0` et le courant opposé à la somme de ses électrodes.
+La version 0.5 conserve encore ce format et autorise une tension et des pertes
+non nulles pour l'ancrage source impédant.
 
 Le taux de charge d'une ligne est le maximum des modules de courant rapporté à
 `max_current_a`. Celui d'un transformateur est le maximum des taux des phases
@@ -309,6 +318,21 @@ intermédiaire et terminale sont respectivement proches de 4,588 A et 4,772 A ;
 le retour à la source a un module de 9,360 A. Les potentiels de neutre sont
 proches de 2,294 V et 4,772 V. L'erreur de bilan est inférieure à 0,001 VA.
 
+## Exemple avec terre source impédante
+
+Ouvrir `examples/reference-source-grounded-bt.json` pour reprendre le cas
+précédent avec une résistance de terre source synthétique de 0,2 ohm.
+
+```sh
+cargo run -- --unbalanced-load-flow examples/reference-source-grounded-bt.json
+cargo run -- --reference-case source-grounded-bt nouveau-projet.json
+```
+
+Le calcul initial converge en 5 itérations. Le retour à la source vaut environ
+6,116 A et déplace son neutre d'environ 1,223 V. Les pertes sont proches de
+487,313 W dans les lignes et 24,182 W dans l'ensemble des terres, dont 7,483 W
+à la source. L'erreur de bilan reste inférieure à 0,001 VA.
+
 Les tests supplémentaires comparent une charge monophasée avec retour parallèle
 neutre/terre à sa solution analytique complexe, puis deux prises de terre à leur
 équivalent parallèle résistif. Ils vérifient aussi le neutre fixé idéalement,
@@ -316,6 +340,6 @@ les connexions idéales redondantes, les impédances capacitives, les lois de
 Kirchhoff avec couplages mutuels, la séparation des pertes et l'affichage des
 résultats. Un test matriciel vérifie aussi que deux zones séparées forment des
 blocs indépendants, et le cas Dyn vérifie les lois de Kirchhoff et les pertes.
-Les autres couplages de transformateurs, le neutre source raccordé par une
-impédance non nulle et le modèle de sol détaillé
-restent des extensions à réaliser.
+Le partage entre conducteur N et chemin de terre avec ancrage source impédant
+est comparé à une solution analytique complexe. Les autres couplages de
+transformateurs et le modèle de sol détaillé restent des extensions à réaliser.

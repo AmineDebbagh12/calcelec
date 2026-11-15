@@ -608,7 +608,7 @@ impl Desktop {
             }
         });
         if self.use_unbalanced {
-            ui.small("ABC/ABCN radial : lignes quatre fils, zones de terre et transformateurs Dyn HTA/BT. Exemples : reference-grounded-bt.json et reference-dyn-grounded.json.");
+            ui.small("ABC/ABCN radial : lignes quatre fils, zones de terre, neutre source impédant et transformateurs Dyn HTA/BT. Exemples : reference-source-grounded-bt.json et reference-dyn-grounded.json.");
         } else if self.simplified_calculation {
             ui.small("Hypothèses : équivalents équilibrés des charges monophasées ; transformateurs purement réactifs, rapport nominal, sans déphasage. Aucun calcul du neutre.");
         }

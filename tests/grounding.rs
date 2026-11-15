@@ -67,6 +67,29 @@ fn analytic(vs: f64, p: f64, q: f64, r: f64, x: f64) -> (f64, f64, f64, f64) {
         (p * vi - q * vr) / squared,
     )
 }
+fn multiply(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0)
+}
+fn divide(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    let norm = b.0 * b.0 + b.1 * b.1;
+    (
+        (a.0 * b.0 + a.1 * b.1) / norm,
+        (a.1 * b.0 - a.0 * b.1) / norm,
+    )
+}
+fn set_source_grounding(network: &mut Network, impedance: Impedance) {
+    for object in network.objects.values_mut() {
+        match &mut object.electrical {
+            Some(ElectricalData::Bus(data)) if object.name == "Source BT" => {
+                data.neutral_grounding = Grounding::Impedance { ohm: impedance };
+            }
+            Some(ElectricalData::Source(data)) => {
+                data.neutral_grounding = Grounding::Impedance { ohm: impedance };
+            }
+            _ => {}
+        }
+    }
+}
 #[test]
 fn finite_grounding_matches_analytical_phase_and_parallel_return_circuit() {
     // Zphase=.04+j.01; Zn=.08+j.01; Zg=2*Zn => Zequivalent return=2/3*Zn.
@@ -119,6 +142,90 @@ fn finite_grounding_matches_analytical_phase_and_parallel_return_circuit() {
     let source = r.groundings.iter().find(|g| g.bus_id != end).unwrap();
     near(source.current_to_earth_a.re, -g.current_to_earth_a.re, 1e-9);
     near(source.current_to_earth_a.im, -g.current_to_earth_a.im, 1e-9);
+}
+
+#[test]
+fn finite_source_grounding_matches_the_complete_parallel_return_circuit() {
+    let downstream = Impedance { r: 0.16, x: 0.02 };
+    let source_impedance = Impedance { r: 0.04, x: 0.01 };
+    let mut network = single(Some(downstream));
+    set_source_grounding(&mut network, source_impedance);
+
+    // Zn=.08+j.01 in parallel with Zg+Zsource=.20+j.03.
+    let neutral = (0.08, 0.01);
+    let earth_path = (
+        downstream.r + source_impedance.r,
+        downstream.x + source_impedance.x,
+    );
+    let parallel = divide(multiply(neutral, earth_path), (0.28, 0.04));
+    let (vr, vi, ir, ii) = analytic(
+        400.0 / 3.0_f64.sqrt(),
+        10000.0,
+        2000.0,
+        0.04 + parallel.0,
+        0.01 + parallel.1,
+    );
+    let earth_current = multiply((ir, ii), divide(neutral, (0.28, 0.04)));
+    let result = unbalanced::solve(&network, &Options::default()).unwrap();
+    let source_id = network
+        .objects
+        .values()
+        .find(|object| object.name == "Source BT")
+        .unwrap()
+        .id;
+    let end_id = network
+        .objects
+        .values()
+        .find(|object| object.name == "Client BT")
+        .unwrap()
+        .id;
+    let bus = result.buses.iter().find(|bus| bus.id == end_id).unwrap();
+    let source = result
+        .groundings
+        .iter()
+        .find(|ground| ground.bus_id == source_id)
+        .unwrap();
+    let electrode = result
+        .groundings
+        .iter()
+        .find(|ground| ground.bus_id == end_id)
+        .unwrap();
+
+    near(bus.phase_neutral[0].magnitude_v, vr.hypot(vi), 1e-6);
+    near(electrode.current_to_earth_a.re, earth_current.0, 1e-6);
+    near(electrode.current_to_earth_a.im, earth_current.1, 1e-6);
+    near(source.current_to_earth_a.re, -earth_current.0, 1e-9);
+    near(source.current_to_earth_a.im, -earth_current.1, 1e-9);
+    let source_voltage = multiply(
+        (source_impedance.r, source_impedance.x),
+        (-earth_current.0, -earth_current.1),
+    );
+    near(source.voltage_v.re, source_voltage.0, 1e-8);
+    near(source.voltage_v.im, source_voltage.1, 1e-8);
+    let current_squared = earth_current.0.powi(2) + earth_current.1.powi(2);
+    near(
+        result.grounding_loss_w,
+        (downstream.r + source_impedance.r) * current_squared,
+        1e-6,
+    );
+    near(
+        result.grounding_loss_var,
+        (downstream.x + source_impedance.x) * current_squared,
+        1e-6,
+    );
+    assert!(result.balance_error_va < 1e-3);
+
+    let mut inconsistent = network;
+    let root = inconsistent.objects.get_mut(&source_id).unwrap();
+    let Some(ElectricalData::Bus(data)) = &mut root.electrical else {
+        unreachable!()
+    };
+    data.neutral_grounding = Grounding::Impedance {
+        ohm: Impedance::ZERO,
+    };
+    let error = unbalanced::solve(&inconsistent, &Options::default()).unwrap_err();
+    assert!(matches!(error, CalculationError::Unsupported(_)));
+    assert!(error.to_string().contains("même impédance"));
 }
 #[test]
 fn ideal_downstream_grounding_fixes_neutral_voltage_and_can_take_the_whole_return() {

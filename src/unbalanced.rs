@@ -17,7 +17,7 @@ use std::{
 mod grounding;
 use grounding::GroundSystem;
 const CONDUCTORS: [Conductor; 4] = [Conductor::A, Conductor::B, Conductor::C, Conductor::N];
-pub const SOLVER_VERSION: &str = "radial-four-wire-0.4";
+pub const SOLVER_VERSION: &str = "radial-four-wire-0.5";
 type Vector = [C; 4];
 type Matrix = [[C; 4]; 4];
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -396,12 +396,20 @@ impl Circuit {
             }
             bus_data.push(data);
         }
-        if full_conductors(&bus_data[root].conductors)
-            && (!grounded(&bus_data[root].neutral_grounding) || !grounded(&data.neutral_grounding))
-        {
-            return Err(unsupported(
-                "une source raccordée en ABCN exige un neutre directement à la terre dans les données du bus et de la source",
-            ));
+        let source_anchor_impedance = if full_conductors(&bus_data[root].conductors) {
+            let (Grounding::Impedance { ohm: bus_ohm }, Grounding::Impedance { ohm: source_ohm }) =
+                (&bus_data[root].neutral_grounding, &data.neutral_grounding)
+            else {
+                return Err(unsupported(
+                    "une source raccordée en ABCN exige une impédance de terre renseignée dans les données du bus et de la source",
+                ));
+            };
+            if bus_ohm != source_ohm {
+                return Err(unsupported(
+                    "la mise à la terre du bus source et celle de la source doivent décrire la même impédance",
+                ));
+            }
+            Some(C::new(source_ohm.r, source_ohm.x))
         } else if phase_conductors(&bus_data[root].conductors)
             && !matches!(data.neutral_grounding, Grounding::NotApplicable)
             && !grounded(&data.neutral_grounding)
@@ -409,7 +417,9 @@ impl Circuit {
             return Err(unsupported(
                 "une source raccordée en ABC doit déclarer son neutre non applicable ou directement mis à la terre hors du modèle de régime permanent",
             ));
-        }
+        } else {
+            None
+        };
         let mut edges = vec![];
         let mut injections = vec![];
         for o in network.objects.values().filter(|o| o.in_service) {
@@ -635,9 +645,12 @@ impl Circuit {
                 transformer_boundaries.insert(node);
             }
         }
-        let mut anchors = transformer_boundaries.clone();
-        if full_conductors(&bus_data[root].conductors) {
-            anchors.insert(root);
+        let mut anchor_impedances: BTreeMap<_, _> = transformer_boundaries
+            .iter()
+            .map(|&node| (node, C::default()))
+            .collect();
+        if let Some(impedance) = source_anchor_impedance {
+            anchor_impedances.insert(root, impedance);
         }
         let mut earth = vec![];
         for (node, data) in bus_data.iter().enumerate() {
@@ -683,7 +696,7 @@ impl Circuit {
         if source.iter().any(|v| !v.finite()) {
             return Err(CalculationError::Numerical(buses[root]));
         }
-        let earth = GroundSystem::build(earth, anchors, &edges, &parent, cancel)?;
+        let earth = GroundSystem::build(earth, anchor_impedances, &edges, &parent, cancel)?;
         let conductors = bus_data
             .iter()
             .map(|data| data.conductors.clone())
@@ -761,7 +774,7 @@ impl Circuit {
         mut currents: Vec<Vector>,
         cancel: &AtomicBool,
     ) -> Result<(Vec<Vector>, Vec<Vector>, Vec<C>)> {
-        let base_voltage = self.sweep(&currents, cancel)?;
+        let base_voltage = self.sweep(&currents, C::default(), cancel)?;
         let rhs: Vec<_> = self
             .earth
             .nodes
@@ -796,7 +809,11 @@ impl Circuit {
         {
             return Err(CalculationError::Numerical(self.buses[self.order[0]]));
         }
-        let voltage = self.sweep(&currents, cancel)?;
+        let anchor_states = self.earth.anchor_states(&earth_currents);
+        let root_neutral = anchor_states
+            .get(&self.order[0])
+            .map_or(C::default(), |(impedance, current)| *impedance * *current);
+        let voltage = self.sweep(&currents, root_neutral, cancel)?;
         for ((&node, &z), &current) in self
             .earth
             .nodes
@@ -809,10 +826,22 @@ impl Circuit {
                 return Err(CalculationError::Numerical(self.buses[node]));
             }
         }
+        for (&anchor, &(impedance, current)) in &anchor_states {
+            let residual = (voltage[anchor][3] - impedance * current).abs();
+            if !residual.is_finite() || residual > 1e-9 * self.nominal[anchor] {
+                return Err(CalculationError::Numerical(self.buses[anchor]));
+            }
+        }
         Ok((voltage, currents, earth_currents))
     }
-    fn sweep(&self, currents: &[Vector], cancel: &AtomicBool) -> Result<Vec<Vector>> {
-        let mut voltage = vec![self.source; self.buses.len()];
+    fn sweep(
+        &self,
+        currents: &[Vector],
+        source_neutral: C,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<Vector>> {
+        let shifted_source = self.source.map(|value| value + source_neutral);
+        let mut voltage = vec![shifted_source; self.buses.len()];
         for &i in &self.order {
             check_cancel(cancel)?;
             if let Some((p, e)) = self.parent[i] {
@@ -851,7 +880,7 @@ pub fn solve_cancellable(
     options.validate()?;
     let circuit = Circuit::build(network, cancel)?;
     let zero_currents = vec![[C::default(); 4]; circuit.buses.len()];
-    let mut voltage = circuit.sweep(&zero_currents, cancel)?;
+    let mut voltage = circuit.sweep(&zero_currents, C::default(), cancel)?;
     let mut residual = f64::INFINITY;
     for iteration in 1..=options.max_iterations {
         check_cancel(cancel)?;
@@ -957,28 +986,17 @@ pub fn solve_cancellable(
             }
         }
         let mut grounding_loss = C::default();
-        let mut anchor_currents: BTreeMap<usize, C> = circuit
-            .earth
-            .anchors
-            .iter()
-            .map(|anchor| (*anchor, C::default()))
-            .collect();
         let mut groundings = vec![];
-        for (((&node, &z), &anchor), &current) in circuit
+        for ((&node, &z), &current) in circuit
             .earth
             .nodes
             .iter()
             .zip(&circuit.earth.impedances)
-            .zip(&circuit.earth.electrode_anchors)
             .zip(&earth_currents)
         {
             check_cancel(cancel)?;
             let ground_loss = z * current.abs().powi(2);
             grounding_loss = grounding_loss + ground_loss;
-            let anchor_current = anchor_currents
-                .get_mut(&anchor)
-                .expect("validated grounding anchor");
-            *anchor_current = *anchor_current - current;
             if !ground_loss.finite() {
                 return Err(CalculationError::Numerical(circuit.buses[node]));
             }
@@ -990,16 +1008,18 @@ pub fn solve_cancellable(
                 loss_var: ground_loss.im,
             });
         }
-        for (anchor, current) in anchor_currents {
-            if !current.finite() || !current.abs().is_finite() {
+        for (anchor, (impedance, current)) in circuit.earth.anchor_states(&earth_currents) {
+            let ground_loss = impedance * current.abs().powi(2);
+            grounding_loss = grounding_loss + ground_loss;
+            if !current.finite() || !current.abs().is_finite() || !ground_loss.finite() {
                 return Err(CalculationError::Numerical(circuit.buses[anchor]));
             }
             groundings.push(GroundingResult {
                 bus_id: circuit.buses[anchor],
                 current_to_earth_a: current.into(),
-                voltage_v: C::default().into(),
-                loss_w: 0.0,
-                loss_var: 0.0,
+                voltage_v: (impedance * current).into(),
+                loss_w: ground_loss.re,
+                loss_var: ground_loss.im,
             });
         }
         let loss = line_loss + transformer_loss + grounding_loss;
@@ -1021,7 +1041,7 @@ pub fn solve_cancellable(
             grounding_loss_w:grounding_loss.re,grounding_loss_var:grounding_loss.im,groundings,buses,branches,
             assumptions:vec![
                 "Réseau radial ABC/ABCN, matrices primitives complètes et source de tension équilibrée idéale.".into(),
-                "Prises de terre résolues par zones galvaniques indépendantes, ancrées au neutre source ou au point étoile Dyn ; chaque zone utilise une référence équipotentielle, sans couplage de sol entre zones ou électrodes.".into(),
+                "Prises de terre résolues par zones galvaniques indépendantes, ancrées au neutre source avec son impédance déclarée ou au point étoile Dyn idéal ; chaque zone utilise une référence équipotentielle, sans couplage de sol entre zones ou électrodes.".into(),
                 "Transformateurs couverts : Dyn HTA/BT, secondaire étoile à neutre directement mis à la terre, excitation nulle et impédance homopolaire déclarée.".into(),
                 "Aucun shunt de ligne ni point étoile flottant. Impédances de source de défaut non utilisées en régime permanent.".into(),
                 "Taux de charge : limite de ligne appliquée aux conducteurs et courants assignés des deux enroulements ; aucun calcul thermique ni harmonique.".into(),

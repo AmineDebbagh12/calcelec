@@ -181,9 +181,13 @@ les courants amont/aval de branche et les pertes propres aux transformateurs.
 La version `radial-four-wire-0.4` conserve ces champs et étend leur sémantique
 aux zones de terre séparées par les Dyn : chaque ancrage publie son courant de
 compensation, opposé à la somme des électrodes de sa zone.
+La version `radial-four-wire-0.5` exploite l'impédance de terre du neutre source
+déjà présente au schéma 4. L'ancrage source peut donc publier une tension et des
+pertes non nulles ; sa déclaration doit être identique sur la source et son bus.
 Le champ historique `currents_a` conserve le courant côté aval. Les lecteurs de
 résultats doivent tenir compte de la version du moteur : le type 0.3 et les
-suivants exigent les nouveaux champs, sans valeur inventée à la lecture d'un ancien rapport. Le schéma
+suivants exigent les nouveaux champs, sans valeur inventée à la lecture d'un
+ancien rapport. Le schéma
 de réseau reste inchangé en version 4 ; les anciennes déclarations de terres,
 auparavant refusées au calcul, sont maintenant exploitées dans le domaine pris
 en charge.

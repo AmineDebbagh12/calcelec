@@ -413,3 +413,24 @@ pub fn grounded_bt() -> Network {
     n.objects.insert(tail.id, tail);
     n
 }
+
+/// Synthetic unbalanced feeder with downstream electrodes and a finite source earth impedance.
+pub fn source_grounded_bt() -> Network {
+    let mut n = grounded_bt();
+    n.name = "Référence synthétique — BT avec terre source impédante".into();
+    let grounding = Grounding::Impedance {
+        ohm: Impedance { r: 0.2, x: 0.0 },
+    };
+    for object in n.objects.values_mut() {
+        match &mut object.electrical {
+            Some(ElectricalData::Bus(data)) if object.name == "Source BT" => {
+                data.neutral_grounding = grounding.clone();
+            }
+            Some(ElectricalData::Source(data)) => {
+                data.neutral_grounding = grounding.clone();
+            }
+            _ => {}
+        }
+    }
+    n
+}

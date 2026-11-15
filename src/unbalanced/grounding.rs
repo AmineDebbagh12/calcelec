@@ -1,21 +1,21 @@
 //! Exact neutral-ground compensation for independent galvanic zones in a radial tree.
 use super::{Edge, check_cancel, unsupported};
 use crate::{complex::C, load_flow::Result};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 
 const MAX_GROUNDINGS: usize = 256;
 pub(super) struct GroundSystem {
     pub nodes: Vec<usize>,
     pub impedances: Vec<C>,
-    pub anchors: Vec<usize>,
+    pub anchor_impedances: BTreeMap<usize, C>,
     pub electrode_anchors: Vec<usize>,
     factor: Option<ComplexLu>,
 }
 impl GroundSystem {
     pub fn build(
         earth: Vec<(usize, C)>,
-        anchors: BTreeSet<usize>,
+        anchor_impedances: BTreeMap<usize, C>,
         edges: &[Edge],
         parent: &[Option<(usize, usize)>],
         cancel: &AtomicBool,
@@ -30,7 +30,7 @@ impl GroundSystem {
         for &(node, _) in &earth {
             let mut path = vec![];
             let mut cursor = node;
-            while !anchors.contains(&cursor) {
+            while !anchor_impedances.contains_key(&cursor) {
                 check_cancel(cancel)?;
                 let Some((p, e)) = parent[cursor] else {
                     return Err(unsupported(
@@ -53,9 +53,9 @@ impl GroundSystem {
         for (i, row) in matrix.iter_mut().enumerate() {
             check_cancel(cancel)?;
             for (j, value) in row.iter_mut().enumerate() {
-                let common =
-                    if electrode_anchors[i] == electrode_anchors[j] {
-                        paths[i]
+                let common = if electrode_anchors[i] == electrode_anchors[j] {
+                    anchor_impedances[&electrode_anchors[i]]
+                        + paths[i]
                             .iter()
                             .zip(&paths[j])
                             .take_while(|(a, b)| a == b)
@@ -66,9 +66,9 @@ impl GroundSystem {
                                 )
                             })
                             })?
-                    } else {
-                        C::default()
-                    };
+                } else {
+                    C::default()
+                };
                 *value = common + if i == j { earth[i].1 } else { C::default() };
             }
         }
@@ -80,7 +80,7 @@ impl GroundSystem {
         Ok(Self {
             nodes: earth.iter().map(|(i, _)| *i).collect(),
             impedances: earth.iter().map(|(_, z)| *z).collect(),
-            anchors: anchors.into_iter().collect(),
+            anchor_impedances,
             electrode_anchors,
             factor,
         })
@@ -90,6 +90,19 @@ impl GroundSystem {
             None => Ok(vec![]),
             Some(factor) => factor.solve(neutral_voltage, cancel),
         }
+    }
+
+    pub fn anchor_states(&self, currents: &[C]) -> BTreeMap<usize, (C, C)> {
+        let mut states: BTreeMap<_, _> = self
+            .anchor_impedances
+            .iter()
+            .map(|(&anchor, &impedance)| (anchor, (impedance, C::default())))
+            .collect();
+        for (&anchor, &current) in self.electrode_anchors.iter().zip(currents) {
+            let (_, total) = states.get_mut(&anchor).expect("validated grounding anchor");
+            *total = *total - current;
+        }
+        states
     }
 }
 
@@ -218,7 +231,7 @@ mod tests {
             line_edge(2, 4, 0.2),
         ];
         let parent = vec![None, Some((0, 0)), Some((0, 1)), Some((1, 2)), Some((2, 3))];
-        let anchors = BTreeSet::from([1, 2]);
+        let anchors = BTreeMap::from([(1, C::default()), (2, C::default())]);
         let cancel = AtomicBool::new(false);
         let system = GroundSystem::build(
             vec![(3, C::new(1.0, 0.0)), (4, C::new(2.0, 0.0))],
