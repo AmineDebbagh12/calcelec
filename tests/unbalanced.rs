@@ -1,7 +1,7 @@
 use calcelec::{
     electrical::*,
     load_flow::{self, CalculationError},
-    model::{Equipment, Network, Phase},
+    model::{Equipment, Network, Object, Phase},
     project::Project,
     reference_cases,
     unbalanced::{self, Options},
@@ -438,46 +438,116 @@ fn downstream_branch_currents_sum_at_the_intermediate_node_with_neutral_kcl() {
     assert!(r.balance_error_va < 1e-3);
 }
 #[test]
-fn topology_loops_islands_and_multiple_sources_are_rejected() {
-    for variant in 0..3 {
-        let mut n = single();
-        match variant {
-            0 => {
-                let mut line = n
-                    .objects
-                    .values()
-                    .find(|o| matches!(o.equipment, Equipment::Line { .. }))
-                    .unwrap()
-                    .clone();
-                line.id = uuid::Uuid::new_v4();
-                n.objects.insert(line.id, line);
-            }
-            1 => {
-                let mut bus = n
-                    .objects
-                    .values()
-                    .find(|o| o.name == "Client BT")
-                    .unwrap()
-                    .clone();
-                bus.id = uuid::Uuid::new_v4();
-                n.objects.insert(bus.id, bus);
-            }
-            _ => {
-                let mut source = n
-                    .objects
-                    .values()
-                    .find(|o| matches!(o.equipment, Equipment::Source { .. }))
-                    .unwrap()
-                    .clone();
-                source.id = uuid::Uuid::new_v4();
-                n.objects.insert(source.id, source);
-            }
-        }
-        assert!(matches!(
-            unbalanced::solve(&n, &Options::default()),
-            Err(CalculationError::Unsupported(_))
-        ));
+fn parallel_abcn_lines_share_current_while_islands_and_multiple_sources_are_rejected() {
+    let mut meshed = single();
+    let mut parallel = meshed
+        .objects
+        .values()
+        .find(|object| matches!(object.equipment, Equipment::Line { .. }))
+        .unwrap()
+        .clone();
+    parallel.id = uuid::Uuid::new_v4();
+    parallel.name = "Câble ABCN parallèle".into();
+    meshed.objects.insert(parallel.id, parallel);
+    let result = unbalanced::solve(&meshed, &Options::default()).unwrap();
+    assert_eq!(result.branches.len(), 2);
+    for conductor in 0..4 {
+        near(
+            result.branches[0].currents_a[conductor].re,
+            result.branches[1].currents_a[conductor].re,
+            1e-8,
+        );
+        near(
+            result.branches[0].currents_a[conductor].im,
+            result.branches[1].currents_a[conductor].im,
+            1e-8,
+        );
     }
+    assert!(result.balance_error_va < 1e-3);
+
+    let mut disconnected = single();
+    let mut bus = disconnected
+        .objects
+        .values()
+        .find(|object| object.name == "Client BT")
+        .unwrap()
+        .clone();
+    bus.id = uuid::Uuid::new_v4();
+    disconnected.objects.insert(bus.id, bus);
+    assert!(matches!(
+        unbalanced::solve(&disconnected, &Options::default()),
+        Err(CalculationError::Unsupported(_))
+    ));
+
+    let mut multiple = single();
+    let mut source = multiple
+        .objects
+        .values()
+        .find(|object| matches!(object.equipment, Equipment::Source { .. }))
+        .unwrap()
+        .clone();
+    source.id = uuid::Uuid::new_v4();
+    multiple.objects.insert(source.id, source);
+    assert!(matches!(
+        unbalanced::solve(&multiple, &Options::default()),
+        Err(CalculationError::Unsupported(_))
+    ));
+}
+
+#[test]
+fn closing_an_abcn_tie_switch_changes_the_operating_topology_without_voltage_drop() {
+    let mut network = single();
+    let line = network
+        .objects
+        .values()
+        .find(|object| matches!(object.equipment, Equipment::Line { .. }))
+        .unwrap();
+    let Equipment::Line { from, to, .. } = line.equipment else {
+        unreachable!()
+    };
+    let mut switch = Object::new(
+        "Bouclage BT",
+        Equipment::Switch {
+            from,
+            to,
+            closed: false,
+        },
+    );
+    switch.electrical = Some(ElectricalData::Switch {
+        conductors: vec![Conductor::A, Conductor::B, Conductor::C, Conductor::N],
+    });
+    let switch_id = switch.id;
+    network.objects.insert(switch_id, switch);
+    let radial = unbalanced::solve(&network, &Options::default()).unwrap();
+    assert_eq!(radial.branches.len(), 1);
+
+    let Equipment::Switch { closed, .. } =
+        &mut network.objects.get_mut(&switch_id).unwrap().equipment
+    else {
+        unreachable!()
+    };
+    *closed = true;
+    let meshed = unbalanced::solve(&network, &Options::default()).unwrap();
+    assert_eq!(meshed.branches.len(), 2);
+    let line_result = meshed
+        .branches
+        .iter()
+        .find(|branch| branch.id != switch_id)
+        .unwrap();
+    let switch_result = meshed
+        .branches
+        .iter()
+        .find(|branch| branch.id == switch_id)
+        .unwrap();
+    assert!(
+        line_result
+            .currents_a
+            .iter()
+            .all(|current| current.magnitude() < 1e-8)
+    );
+    assert!(switch_result.currents_a[0].magnitude() > 1.0);
+    assert!(meshed.total_loss_w < radial.total_loss_w);
+    assert!(meshed.balance_error_va < 1e-3);
 }
 #[test]
 fn unbalanced_demo_has_phase_differences_return_current_and_conserved_power() {

@@ -161,7 +161,7 @@ aux matrices et aux enroulements restent à améliorer.
 
 ## Cas de référence et validation
 
-Sept projets autonomes ciblent les modèles détaillés dans `examples/` :
+Huit projets autonomes ciblent les modèles détaillés dans `examples/` :
 
 | Cas | Modèle et contrôle analytique |
 | --- | --- |
@@ -172,6 +172,7 @@ Sept projets autonomes ciblent les modèles détaillés dans `examples/` :
 | `reference-dyn-grounded.json` | Même Dyn11 suivi d'un câble ABCN de 50 m et d'une prise de terre terminale ; courant d'électrode, compensation au point étoile, tensions et pertes vérifiés dans la zone BT |
 | `reference-source-grounded-bt.json` | Départ BT déséquilibré avec deux terres aval et résistance de terre source de 0,2 ohm ; déplacement du neutre source, partage des courants et pertes vérifiés |
 | `reference-rural-unbalanced.json` | Trois tronçons HTA, trois Dyn11 et trois zones BT, dont un départ ABCN détaillé avec charges monophasées, PV et terre terminale ; connectivité, blocage homopolaire, pertes et bilans vérifiés |
+| `reference-rural-meshed.json` | Variante du réseau rural avec une liaison HTA de bouclage ; cycle actif, répartition des courants, baisse des pertes de ligne et bilan global vérifiés |
 
 Ces valeurs sont synthétiques et ne décrivent pas des ouvrages Enedis types.
 Les tests vérifient tensions, angles, courants et pertes face aux solutions

@@ -584,3 +584,44 @@ pub fn rural_unbalanced() -> Network {
     }
     n
 }
+
+/// Weakly meshed variant with a second HTA path between the source and the remote station.
+pub fn rural_meshed() -> Network {
+    let mut n = rural_unbalanced();
+    n.name = "Référence synthétique — réseau rural HTA bouclé".into();
+    let source = n
+        .objects
+        .values()
+        .find(|object| object.name == "Poste source — HTA")
+        .unwrap()
+        .id;
+    let remote = n
+        .objects
+        .values()
+        .find(|object| object.name == "Poste rural 3 — HTA")
+        .unwrap()
+        .id;
+    let mut tie = n
+        .objects
+        .values()
+        .find(|object| object.name == "Départ aérien — tronçon 1")
+        .unwrap()
+        .clone();
+    tie.id = uuid::Uuid::new_v4();
+    tie.name = "Liaison HTA de bouclage".into();
+    tie.equipment = Equipment::Line {
+        from: source,
+        to: remote,
+        length_m: 4200.0,
+        r_ohm_per_km: 0.4,
+        x_ohm_per_km: 0.35,
+        max_current_a: 200.0,
+    };
+    tie.geometry = Geometry::Polyline(vec![
+        Coordinate(0.0, 0.0),
+        Coordinate(1900.0, -650.0),
+        Coordinate(3800.0, 500.0),
+    ]);
+    n.objects.insert(tie.id, tie);
+    n
+}

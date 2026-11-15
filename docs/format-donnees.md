@@ -187,6 +187,11 @@ pertes non nulles ; sa déclaration doit être identique sur la source et son bu
 La version `radial-four-wire-0.6` ajoute le groupe Yzn au même contrat de résultat :
 son secondaire zigzag mis à la terre définit une zone galvanique, tandis que le
 primaire étoile isolé ne transmet pas le courant homopolaire aux conducteurs HTA.
+La version `meshed-four-wire-0.7` conserve le schéma de résultat et accepte les
+branches de fermeture ligne/interrupteur dans une même zone galvanique. Les
+branches de l'arbre couvrant restent orientées depuis la source ; une fermeture
+est orientée selon les bornes `from` et `to` de l'objet. L'hypothèse publiée dans
+le résultat indique explicitement le nombre de fermetures actives.
 Le champ historique `currents_a` conserve le courant côté aval. Les lecteurs de
 résultats doivent tenir compte de la version du moteur : le type 0.3 et les
 suivants exigent les nouveaux champs, sans valeur inventée à la lecture d'un

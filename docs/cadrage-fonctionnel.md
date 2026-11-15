@@ -398,7 +398,7 @@ Il est validé par des solutions analytiques monophasées et par comparaison au
 moteur équilibré sur un cas symétrique. Les terres BT sont désormais découpées
 en zones galvaniques ancrées à la source ou au secondaire Dyn/Yzn. L'ancrage
 source accepte désormais une impédance complexe non nulle. Les modèles de sol
-détaillés, les calculs maillés et les
+détaillés, les mailles traversant des transformateurs et les
 courts-circuits restent à développer.
 Voir le [premier jalon ABCN](calcul-desequilibre.md) pour ses limites précises.
 Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventions
@@ -417,8 +417,8 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | --- | --- | --- |
 | A — Spécification numérique | Modèles, conventions et cas de référence | Socle établi ; à compléter pour chaque nouveau calcul avec résultats attendus et tolérances |
 | A bis — Contrat de données | Objets, instantanés, versions et lots documentés | Socle opérationnel ; compacité et montée en charge encore à mesurer |
-| B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; cas maillés et validation indépendante restant à couvrir |
-| C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial, terres multi-zones, neutre source impédant, groupes Dyn/Yzn et cas rural détaillé disponibles ; comparaison indépendante et mailles à compléter |
+| B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; le diagnostic de topologie est partagé, mais le calcul équilibré maillé reste à couvrir |
+| C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial et faiblement maillé, terres multi-zones, neutre source impédant, groupes Dyn/Yzn et cas rural détaillé disponibles ; comparaison indépendante et mailles générales à compléter |
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Défauts supportés validés, cas min/max et contributions vérifiés |
 | E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
@@ -429,9 +429,9 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 
 1. **Achever C — validation indépendante** : rejouer le cas rural HTA/BT
    complet dans un moteur de référence et documenter les écarts et tolérances.
-2. **Achever B/C — topologies d'exploitation** : calcul des réseaux maillés dans
-   le domaine retenu, îlots et configurations avec points de coupure, sans
-   confondre une maille dessinée et une maille effectivement fermée.
+2. **Achever B/C — topologies d'exploitation** : étendre le calcul faiblement
+   maillé aux topologies générales et au moteur équilibré ; le diagnostic des
+   îlots, points de coupure et mailles effectivement fermées est désormais disponible.
 3. **Réaliser D — courts-circuits** : figer l'édition et le sous-ensemble IEC
    60909, développer défauts triphasés, biphasés et à la terre, cas min/max,
    contributions et cas analytiques HTA/BT.

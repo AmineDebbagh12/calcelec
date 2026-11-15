@@ -1,4 +1,5 @@
-//! Exact neutral-ground compensation for independent galvanic zones in a radial tree.
+//! Exact neutral-ground compensation for independent galvanic zones on the
+//! spanning tree used by the radial and weakly meshed solver.
 use super::{Edge, check_cancel, unsupported};
 use crate::{complex::C, load_flow::Result};
 use std::collections::BTreeMap;
@@ -107,18 +108,18 @@ impl GroundSystem {
 }
 
 /// Row-scaled LU with partial pivoting, reused at every load-flow iteration.
-struct ComplexLu {
+pub(super) struct ComplexLu {
     matrix: Vec<Vec<C>>,
     permutation: Vec<usize>,
     scales: Vec<f64>,
 }
 fn singular() -> crate::load_flow::CalculationError {
     unsupported(
-        "système des mises à la terre singulier ou trop mal conditionné : vérifier les connexions idéales redondantes, les impédances et les compensations",
+        "système linéaire singulier ou trop mal conditionné : vérifier les connexions idéales redondantes, les impédances, les mises à la terre et les branches de fermeture",
     )
 }
 impl ComplexLu {
-    fn factor(mut matrix: Vec<Vec<C>>, cancel: &AtomicBool) -> Result<Self> {
+    pub(super) fn factor(mut matrix: Vec<Vec<C>>, cancel: &AtomicBool) -> Result<Self> {
         let size = matrix.len();
         let mut scales = Vec::with_capacity(size);
         for row in &mut matrix {
@@ -167,7 +168,7 @@ impl ComplexLu {
             scales,
         })
     }
-    fn solve(&self, rhs: &[C], cancel: &AtomicBool) -> Result<Vec<C>> {
+    pub(super) fn solve(&self, rhs: &[C], cancel: &AtomicBool) -> Result<Vec<C>> {
         if rhs.len() != self.matrix.len() {
             return Err(singular());
         }

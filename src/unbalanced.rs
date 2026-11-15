@@ -1,4 +1,5 @@
-//! Four-conductor radial AC load flow in physical units, with an explicit neutral.
+//! Four-conductor radial and weakly meshed AC load flow in physical units,
+//! with an explicit neutral.
 use crate::{
     complex::C,
     electrical::{
@@ -15,11 +16,12 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 mod grounding;
-use grounding::GroundSystem;
+use grounding::{ComplexLu, GroundSystem};
 const CONDUCTORS: [Conductor; 4] = [Conductor::A, Conductor::B, Conductor::C, Conductor::N];
-pub const SOLVER_VERSION: &str = "radial-four-wire-0.6";
+pub const SOLVER_VERSION: &str = "meshed-four-wire-0.7";
 type Vector = [C; 4];
 type Matrix = [[C; 4]; 4];
+type LinearStep = (Vec<Vector>, Vec<Vector>, Vec<Vector>, Vec<C>);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Options {
@@ -95,11 +97,12 @@ pub struct BranchResult {
     pub id: Id,
     pub from_bus: Id,
     pub to_bus: Id,
-    /// Oriented from the source downstream; order A B C N.
+    /// Tree branches are oriented from the source downstream; cycle closures use
+    /// the object's stored `from`/`to` direction. Order A B C N.
     pub currents_a: [Phasor; 4],
-    /// Current entering the branch on its upstream side; order A B C N.
+    /// Current entering the branch on `from_bus`; order A B C N.
     pub currents_from_a: [Phasor; 4],
-    /// Current leaving the branch on its downstream side; order A B C N.
+    /// Current leaving the branch on `to_bus`; order A B C N.
     pub currents_to_a: [Phasor; 4],
     pub p_from_w: f64,
     pub q_from_var: f64,
@@ -335,6 +338,7 @@ struct Circuit {
     injections: Vec<Injection>,
     order: Vec<usize>,
     parent: Vec<Option<(usize, usize)>>,
+    chords: Vec<usize>,
     source: Vector,
     earth: GroundSystem,
 }
@@ -607,20 +611,27 @@ impl Circuit {
         let mut order = vec![];
         let mut parent = vec![None; buses.len()];
         let mut seen = vec![false; buses.len()];
+        let mut edge_seen = vec![false; edges.len()];
+        let mut chords = vec![];
         seen[root] = true;
         let mut queue = VecDeque::from([root]);
         while let Some(a) = queue.pop_front() {
             check_cancel(cancel)?;
             order.push(a);
             for &(b, e) in &adjacency[a] {
-                if parent[a].is_some_and(|(_, p)| p == e) {
+                if edge_seen[e] {
                     continue;
                 }
+                edge_seen[e] = true;
                 if seen[b] {
-                    return Err(unsupported(format!(
-                        "boucle ou branches parallèles : {}",
-                        network.objects[&edges[e].id].name
-                    )));
+                    if edges[e].transformer() {
+                        return Err(unsupported(format!(
+                            "{} : un transformateur ne peut pas être la branche de fermeture d'une boucle",
+                            network.objects[&edges[e].id].name
+                        )));
+                    }
+                    chords.push(e);
+                    continue;
                 }
                 seen[b] = true;
                 parent[b] = Some((a, e));
@@ -629,7 +640,7 @@ impl Circuit {
         }
         if order.len() != buses.len() {
             return Err(unsupported(
-                "jeux de barres en service non alimentés : le réseau ABCN doit être radial et connecté",
+                "jeux de barres en service non alimentés : le réseau ABCN doit être connecté à la source active",
             ));
         }
         let mut transformer_boundaries = BTreeSet::new();
@@ -647,6 +658,33 @@ impl Circuit {
                 }
                 transformer_boundaries.insert(node);
             }
+        }
+        let mut zones = vec![root; buses.len()];
+        for &node in &order {
+            if let Some((parent_node, edge)) = parent[node] {
+                zones[node] = if edges[edge].transformer() {
+                    node
+                } else {
+                    zones[parent_node]
+                };
+            }
+        }
+        for &edge in &chords {
+            if zones[edges[edge].a] != zones[edges[edge].b] {
+                return Err(unsupported(format!(
+                    "{} : une boucle ne peut pas relier deux zones galvaniques séparées par un transformateur",
+                    network.objects[&edges[edge].id].name
+                )));
+            }
+        }
+        let mesh_variables: usize = chords
+            .iter()
+            .map(|&edge| bus_data[edges[edge].a].conductors.len())
+            .sum();
+        if mesh_variables > 64 {
+            return Err(unsupported(
+                "ce jalon accepte au plus 64 courants de compensation de boucle par calcul",
+            ));
         }
         let mut anchor_impedances: BTreeMap<_, _> = transformer_boundaries
             .iter()
@@ -713,10 +751,11 @@ impl Circuit {
             injections,
             order,
             parent,
+            chords,
             source,
         })
     }
-    fn currents(&self, voltage: &[Vector], cancel: &AtomicBool) -> Result<Vec<Vector>> {
+    fn injection_currents(&self, voltage: &[Vector], cancel: &AtomicBool) -> Result<Vec<Vector>> {
         let mut currents = vec![[C::default(); 4]; self.buses.len()];
         for injection in &self.injections {
             check_cancel(cancel)?;
@@ -754,15 +793,6 @@ impl Circuit {
                 _ => unreachable!("validated supported connection"),
             }
         }
-        for &i in self.order.iter().rev() {
-            check_cancel(cancel)?;
-            if let Some((p, edge)) = self.parent[i] {
-                let upstream = self.edges[edge].upstream_current(currents[i]);
-                for (target, value) in currents[p].iter_mut().zip(upstream) {
-                    *target = *target + value;
-                }
-            }
-        }
         if currents
             .iter()
             .flatten()
@@ -772,11 +802,22 @@ impl Circuit {
         }
         Ok(currents)
     }
-    fn linear_step(
+
+    fn radial_step(
         &self,
-        mut currents: Vec<Vector>,
+        nodal_currents: &[Vector],
         cancel: &AtomicBool,
     ) -> Result<(Vec<Vector>, Vec<Vector>, Vec<C>)> {
+        let mut currents = nodal_currents.to_vec();
+        for &i in self.order.iter().rev() {
+            check_cancel(cancel)?;
+            if let Some((p, edge)) = self.parent[i] {
+                let upstream = self.edges[edge].upstream_current(currents[i]);
+                for (target, value) in currents[p].iter_mut().zip(upstream) {
+                    *target = *target + value;
+                }
+            }
+        }
         let base_voltage = self.sweep(&currents, C::default(), cancel)?;
         let rhs: Vec<_> = self
             .earth
@@ -837,6 +878,83 @@ impl Circuit {
         }
         Ok((voltage, currents, earth_currents))
     }
+
+    fn linear_step(&self, nodal_currents: Vec<Vector>, cancel: &AtomicBool) -> Result<LinearStep> {
+        if self.chords.is_empty() {
+            let (voltage, currents, earth) = self.radial_step(&nodal_currents, cancel)?;
+            return Ok((voltage, currents, vec![], earth));
+        }
+        let zero = vec![[C::default(); 4]; self.buses.len()];
+        let (zero_voltage, _, _) = self.radial_step(&zero, cancel)?;
+        let (base_voltage, _, _) = self.radial_step(&nodal_currents, cancel)?;
+        let variables: Vec<_> = self
+            .chords
+            .iter()
+            .enumerate()
+            .flat_map(|(chord, &edge)| {
+                self.conductors[self.edges[edge].a]
+                    .iter()
+                    .map(move |conductor| (chord, phase_index(*conductor)))
+            })
+            .collect();
+        let mut matrix = vec![vec![C::default(); variables.len()]; variables.len()];
+        let mut rhs = vec![C::default(); variables.len()];
+        for (row, &(chord, conductor)) in variables.iter().enumerate() {
+            let edge = &self.edges[self.chords[chord]];
+            rhs[row] = base_voltage[edge.a][conductor] - base_voltage[edge.b][conductor];
+        }
+        for (column, &(basis_chord, basis_conductor)) in variables.iter().enumerate() {
+            check_cancel(cancel)?;
+            let basis_edge = &self.edges[self.chords[basis_chord]];
+            let mut basis = zero.clone();
+            basis[basis_edge.a][basis_conductor] = C::new(1.0, 0.0);
+            basis[basis_edge.b][basis_conductor] = C::new(-1.0, 0.0);
+            let (response_voltage, _, _) = self.radial_step(&basis, cancel)?;
+            for (row, &(chord, conductor)) in variables.iter().enumerate() {
+                let edge = &self.edges[self.chords[chord]];
+                let response = response_voltage[edge.a][conductor]
+                    - response_voltage[edge.b][conductor]
+                    - zero_voltage[edge.a][conductor]
+                    + zero_voltage[edge.b][conductor];
+                let series = if chord == basis_chord {
+                    match edge.model {
+                        EdgeModel::Line(z) => z[conductor][basis_conductor],
+                        EdgeModel::GroundedSecondary { .. } => unreachable!("validated chord"),
+                    }
+                } else {
+                    C::default()
+                };
+                matrix[row][column] = series - response;
+            }
+        }
+        let compensation = ComplexLu::factor(matrix, cancel)?.solve(&rhs, cancel)?;
+        let mut adjusted = nodal_currents;
+        let mut chord_currents = vec![[C::default(); 4]; self.chords.len()];
+        for (&(chord, conductor), &current) in variables.iter().zip(&compensation) {
+            let edge = &self.edges[self.chords[chord]];
+            chord_currents[chord][conductor] = current;
+            adjusted[edge.a][conductor] = adjusted[edge.a][conductor] + current;
+            adjusted[edge.b][conductor] = adjusted[edge.b][conductor] - current;
+        }
+        let (voltage, currents, earth) = self.radial_step(&adjusted, cancel)?;
+        for (chord, &edge_index) in self.chords.iter().enumerate() {
+            let edge = &self.edges[edge_index];
+            let EdgeModel::Line(z) = edge.model else {
+                unreachable!("validated chord")
+            };
+            for conductor in self.conductors[edge.a].iter().map(|c| phase_index(*c)) {
+                let drop = (0..4).fold(C::default(), |sum, other| {
+                    sum + z[conductor][other] * chord_currents[chord][other]
+                });
+                let residual =
+                    (voltage[edge.a][conductor] - voltage[edge.b][conductor] - drop).abs();
+                if !residual.is_finite() || residual > 1e-9 * self.nominal[edge.a] {
+                    return Err(CalculationError::Numerical(self.buses[edge.a]));
+                }
+            }
+        }
+        Ok((voltage, currents, chord_currents, earth))
+    }
     fn sweep(
         &self,
         currents: &[Vector],
@@ -887,9 +1005,10 @@ pub fn solve_cancellable(
     let mut residual = f64::INFINITY;
     for iteration in 1..=options.max_iterations {
         check_cancel(cancel)?;
-        (voltage, _, _) = circuit.linear_step(circuit.currents(&voltage, cancel)?, cancel)?;
-        let (corrected, currents, earth_currents) =
-            circuit.linear_step(circuit.currents(&voltage, cancel)?, cancel)?;
+        (voltage, _, _, _) =
+            circuit.linear_step(circuit.injection_currents(&voltage, cancel)?, cancel)?;
+        let (corrected, currents, chord_currents, earth_currents) =
+            circuit.linear_step(circuit.injection_currents(&voltage, cancel)?, cancel)?;
         residual = voltage
             .iter()
             .zip(&corrected)
@@ -988,6 +1107,38 @@ pub fn solve_cancellable(
                 });
             }
         }
+        for (chord, &edge_index) in circuit.chords.iter().enumerate() {
+            check_cancel(cancel)?;
+            let edge = &circuit.edges[edge_index];
+            let current = chord_currents[chord];
+            let from = power(voltage[edge.a], current);
+            let to = power(voltage[edge.b], current);
+            let branch_loss = from - to;
+            let loading = edge.loading(current, current);
+            if !from.finite()
+                || !to.finite()
+                || !branch_loss.finite()
+                || loading.is_some_and(|value| !value.is_finite())
+            {
+                return Err(CalculationError::Numerical(circuit.buses[edge.a]));
+            }
+            line_loss = line_loss + branch_loss;
+            branches.push(BranchResult {
+                id: edge.id,
+                from_bus: circuit.buses[edge.a],
+                to_bus: circuit.buses[edge.b],
+                currents_a: current.map(Into::into),
+                currents_from_a: current.map(Into::into),
+                currents_to_a: current.map(Into::into),
+                p_from_w: from.re,
+                q_from_var: from.im,
+                p_to_w: to.re,
+                q_to_var: to.im,
+                loss_w: branch_loss.re,
+                loss_var: branch_loss.im,
+                loading_percent: loading,
+            });
+        }
         let mut grounding_loss = C::default();
         let mut groundings = vec![];
         for ((&node, &z), &current) in circuit
@@ -1043,7 +1194,11 @@ pub fn solve_cancellable(
             transformer_loss_w:transformer_loss.re,transformer_loss_var:transformer_loss.im,
             grounding_loss_w:grounding_loss.re,grounding_loss_var:grounding_loss.im,groundings,buses,branches,
             assumptions:vec![
-                "Réseau radial ABC/ABCN, matrices primitives complètes et source de tension équilibrée idéale.".into(),
+                if circuit.chords.is_empty() {
+                    "Réseau radial ABC/ABCN, matrices primitives complètes et source de tension équilibrée idéale.".into()
+                } else {
+                    format!("Réseau ABC/ABCN faiblement maillé avec {} branche(s) de fermeture, matrices primitives complètes et source de tension équilibrée idéale.", circuit.chords.len())
+                },
                 "Prises de terre résolues par zones galvaniques indépendantes, ancrées au neutre source avec son impédance déclarée ou au neutre BT Dyn/Yzn idéal ; chaque zone utilise une référence équipotentielle, sans couplage de sol entre zones ou électrodes.".into(),
                 "Transformateurs couverts : Dyn et Yzn HTA/BT, secondaire à neutre directement mis à la terre, excitation nulle et impédance homopolaire déclarée ; le primaire étoile Yzn est isolé sans borne N.".into(),
                 "Aucun shunt de ligne ni point étoile flottant. Impédances de source de défaut non utilisées en régime permanent.".into(),

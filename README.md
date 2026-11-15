@@ -5,7 +5,7 @@ HTA/BT, avec la France et Enedis comme référence métier.
 
 **État : prototype avec toolbox géographique, modélisation, partage et répartition de puissance AC
 équilibrée sur réseaux radiaux, plus un moteur déséquilibré ABC/ABCN couvrant
-les départs BT et les transformateurs Dyn/Yzn HTA/BT. Les courts-circuits
+les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT. Les courts-circuits
 restent à implémenter.**
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
@@ -48,6 +48,9 @@ et leurs propriétés restent modifiables, mais les raccordements, positions et
 tracés se modifient exclusivement dans la vue géographique.
 Le diagnostic d'alimentation vérifie uniquement
 les connexions, sans calcul électrique ni prise en compte d'une production îlotée.
+La commande `--topology` fournit en complément un rapport d'exploitation :
+composants, bus alimentés ou non, états des interrupteurs et branches fermant
+une maille. Son [contrat est documenté ici](docs/diagnostic-topologie.md).
 
 Les projets sont initialement en mémoire. Avant de fermer, ouvrir ou relire un
 projet, sauvegarder les versions à conserver. Les champs de l'inspecteur doivent
@@ -106,7 +109,7 @@ version. Les structures préremplies sont provisoires et doivent être vérifié
 Les données inconnues des anciens projets restent absentes ; l'application les
 signale dans **Données détaillées** et la commande `--check`.
 
-Sept cas synthétiques sont notamment fournis :
+Huit cas synthétiques sont notamment fournis :
 [ligne quatre conducteurs](examples/reference-four-wire.json) et
 [transformateur équilibré avec pertes cuivre](examples/reference-transformer.json),
 ainsi qu'un [transformateur Dyn11 déséquilibré](examples/reference-dyn-transformer.json).
@@ -118,6 +121,8 @@ Le cas [BT avec terre source impédante](examples/reference-source-grounded-bt.j
 vérifie le potentiel et les pertes de l'ancrage source.
 Le [réseau rural HTA/BT détaillé](examples/reference-rural-unbalanced.json)
 réunit trois postes, plusieurs zones de terre, des charges déséquilibrées et du PV.
+Sa [variante bouclée](examples/reference-rural-meshed.json) ajoute une liaison HTA
+de fermeture afin de vérifier la détection de cycle et la répartition des courants.
 Ils se calculent sans les options de simplification. Le moteur exploite leurs
 matrices et résistances ; le moteur déséquilibré applique aussi le rapport, la
 prise fixe, le déphasage horaire et l'impédance homopolaire des cas Dyn/Yzn pris en charge.
@@ -161,7 +166,7 @@ Il présente les tensions et angles par phase, les courants A/B/C/N, le potentie
 du neutre, le déséquilibre U2/U1 et les pertes. Les résultats sont exportables
 avec leur version et leurs hypothèses.
 
-Ce jalon accepte les départs radiaux BT à tension unique, avec neutre source
+Ce jalon accepte les départs radiaux ou faiblement maillés à tension unique, avec neutre source
 raccordé à la terre directement ou par une impédance complexe, et des prises de
 terre aval sur une référence commune à leur zone galvanique. L'impédance source
 doit être identique dans les données du bus et de la source.
@@ -175,6 +180,9 @@ les shunts, phases manquantes et points étoile flottants restent refusés.
 Le cas `examples/reference-rural-unbalanced.json` fournit désormais le parcours
 rural complet avec des données détaillées explicites ; l'exemple historique
 créé au démarrage conserve volontairement son parcours équilibré simplifié.
+Le cas `examples/reference-rural-meshed.json` ferme une boucle HTA par une ligne
+supplémentaire. Les boucles doivent rester dans une même zone galvanique et ne
+peuvent pas traverser un transformateur dans cette première implémentation.
 Un deuxième exemple, `examples/reference-grounded-bt.json`, ajoute des terres
 intermédiaire et terminale. Il conserve les mêmes commandes et le même mode de
 calcul ; les pertes totales incluent désormais lignes et prises de terre.
@@ -223,6 +231,8 @@ cargo run -- --unbalanced-load-flow examples/reference-yzn-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-dyn-grounded.json
 cargo run -- --unbalanced-load-flow examples/reference-source-grounded-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-rural-unbalanced.json
+cargo run -- --topology examples/reference-rural-meshed.json
+cargo run -- --unbalanced-load-flow examples/reference-rural-meshed.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -244,15 +254,16 @@ projets et le rendu des deux vues sans serveur graphique.
 Les tests d’édition vérifient le placement, le tracé, les dépendances, les
 annulations et les gestes souris de déplacement et de modification des sommets.
 Les tests numériques comparent les tensions, angles, courants et pertes à des
-solutions analytiques, puis vérifient le bilan du réseau rural, les erreurs
+solutions analytiques, puis vérifient les bilans des réseaux ruraux radial et
+bouclé, les changements d'état des interrupteurs, les erreurs
 attendues, l'annulation et l'invalidation des résultats après modification.
 
 ## Suite du développement
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Comparer le cas rural HTA/BT détaillé à un moteur indépendant, puis couvrir
-  les réseaux maillés, les modèles de sol détaillés et les courts-circuits.
+- Comparer le cas rural HTA/BT détaillé à un moteur indépendant, puis généraliser
+  les topologies maillées, les modèles de sol détaillés et les courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

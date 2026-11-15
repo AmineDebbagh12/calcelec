@@ -1,7 +1,7 @@
 use calcelec::{
     electrical,
     model::Equipment,
-    reference_cases,
+    reference_cases, topology,
     unbalanced::{self, Options, Phasor},
 };
 
@@ -87,4 +87,29 @@ fn complete_rural_case_connects_three_grounded_bt_zones_and_balances_power() {
         .flat_map(|bus| bus.phase_neutral.iter().map(|voltage| voltage.pu))
         .fold(f64::INFINITY, f64::min);
     assert!(minimum_bt_voltage > 0.97);
+}
+
+#[test]
+fn rural_loop_is_detected_solved_and_reduces_line_losses() {
+    let radial = reference_cases::rural_unbalanced();
+    let meshed = reference_cases::rural_meshed();
+
+    let topology = topology::analyze(&meshed).unwrap();
+    assert!(!topology.radial);
+    assert_eq!(topology.components.len(), 1);
+    assert_eq!(topology.cycle_closures.len(), 1);
+    assert!(topology.unenergized_buses.is_empty());
+
+    let radial_result = unbalanced::solve(&radial, &Options::default()).unwrap();
+    let meshed_result = unbalanced::solve(&meshed, &Options::default()).unwrap();
+    assert_eq!(meshed_result.buses.len(), 8);
+    assert_eq!(meshed_result.branches.len(), 8);
+    assert_eq!(meshed_result.net_demand_p_w, radial_result.net_demand_p_w);
+    assert_eq!(
+        meshed_result.net_demand_q_var,
+        radial_result.net_demand_q_var
+    );
+    assert!(meshed_result.line_loss_w < radial_result.line_loss_w);
+    assert!(meshed_result.balance_error_va < 1e-3);
+    assert!(meshed_result.assumptions[0].contains("faiblement maillé"));
 }

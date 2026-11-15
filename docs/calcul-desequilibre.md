@@ -1,7 +1,7 @@
-# Régime permanent déséquilibré — réseau radial ABC/ABCN
+# Régime permanent déséquilibré — réseau radial ou faiblement maillé ABC/ABCN
 
-Moteur : `radial-four-wire-0.6`, dans `src/unbalanced.rs`.
-Il couvre les réseaux radiaux BT à quatre conducteurs et les franchissements
+Moteur : `meshed-four-wire-0.7`, dans `src/unbalanced.rs`.
+Il couvre les réseaux radiaux ou faiblement maillés BT à quatre conducteurs et les franchissements
 HTA/BT Dyn/Yzn depuis un réseau amont ABC alimenté par une source équilibrée idéale.
 Le neutre BT est représenté sans élimination, avec ses impédances propres et ses
 couplages aux phases.
@@ -29,7 +29,10 @@ Ce jalon est une première partie du moteur HTA/BT déséquilibré prévu pour l
   à vide explicitement nuls, impédance homopolaire renseignée et prise fixe autorisée.
 - Charges et productions P/Q constantes avec connexion détaillée phase-neutre,
   entre phases, étoile triphasée avec neutre ou triangle triphasé.
-- Réseau en service connecté, sans boucle ni branche parallèle fermée.
+- Réseau en service connecté. Les boucles peuvent être fermées par des lignes ou
+  interrupteurs ABC/ABCN dans une même zone galvanique ; une boucle ne peut pas
+  traverser un transformateur. Le système dense de compensation accepte au plus
+  64 courants de conducteur sur l'ensemble des branches de fermeture.
 
 La présence de matrices est obligatoire : le moteur ne reconstruit pas une
 impédance de neutre depuis les seuls R/X du modèle historique.
@@ -76,13 +79,16 @@ une terre source impédante, les quatre potentiels de la source sont translatés
 par VN sans modifier ces tensions composées ou phase-neutre. Les résultats par
 phase en pu utilisent `Unominale_composée / sqrt(3)` comme base.
 
-Le moteur utilise un balayage arrière/avant par sommation des courants :
+Le moteur construit un arbre couvrant déterministe et utilise un balayage
+arrière/avant par sommation des courants :
 
 1. Calculer les courants des injections d'après leurs tensions aux bornes.
 2. Sommer les courants de chaque conducteur depuis les feuilles vers la source.
 3. Recalculer les tensions vers l'aval par la matrice de ligne ou la relation
    de transformation en composantes symétriques.
-4. Recalculer les courants puis effectuer un balayage de contrôle.
+4. Pour chaque fermeture, résoudre les courants de compensation qui annulent
+   l'écart entre la chute de tension de la branche et celle de l'arbre couvrant.
+5. Recalculer les courants puis effectuer un balayage de contrôle.
 
 Le résidu est le maximum des écarts de phaseurs de tension du balayage de
 contrôle, normalisé par la base phase-neutre de chaque bus. Les valeurs par
@@ -205,8 +211,9 @@ séquence inverse/directe U2/U1. Ce dernier est calculé sur les tensions
 phase-neutre ; ce n'est pas l'écart maximal entre trois modules de tension.
 
 Par branche : phaseurs des quatre courants, flux P/Q amont et aval, pertes
-actives et réactives. Les orientations sont de la source vers l'aval,
-indépendamment de l'ordre `from/to` stocké dans l'objet.
+actives et réactives. Les branches de l'arbre sont orientées de la source vers
+l'aval, indépendamment de l'ordre stocké ; les fermetures utilisent l'orientation
+`from` vers `to` de l'objet.
 La puissance d'une extrémité est `sum(Vk × conj(Ik))`, neutre inclus.
 Les pertes des lignes sont calculées par `sum((Z×I)k × conj(Ik))` : elles
 incluent la résistance du neutre et les couplages, sans les réduire à trois
@@ -230,6 +237,9 @@ La version 0.5 conserve encore ce format et autorise une tension et des pertes
 non nulles pour l'ancrage source impédant.
 La version 0.6 ajoute Yzn avec le même format de sortie et les mêmes champs de
 pertes, tensions et courants sur les deux côtés du transformateur.
+La version 0.7 conserve ces champs, ajoute toutes les branches de fermeture au
+résultat et indique leur nombre dans les hypothèses. Le courant d'une fermeture
+est orienté selon l'objet ; il peut donc être négatif par rapport au transit réel.
 
 Le taux de charge d'une ligne est le maximum des modules de courant rapporté à
 `max_current_a`. Celui d'un transformateur est le maximum des taux des phases
@@ -382,6 +392,13 @@ galvaniques, l'absence de courant homopolaire sur les lignes HTA, la fermeture
 locale des courants de terre et la somme détaillée des pertes. Ce cas prépare
 la comparaison avec un moteur indépendant ; il ne constitue pas encore cette
 validation externe.
+
+La variante `examples/reference-rural-meshed.json` ajoute une liaison HTA de
+bouclage entre la source et le troisième poste. `--topology` détecte une branche
+de fermeture et un unique composant alimenté. Le calcul converge en 5 itérations
+avec huit branches ; les pertes de ligne passent d'environ 212,436 W à 159,263 W,
+pour une erreur de bilan toujours inférieure à 0,001 VA. Ce contrôle vérifie la
+loi de tension de la maille, le partage des transits et la conservation de puissance.
 
 Les tests supplémentaires comparent une charge monophasée avec retour parallèle
 neutre/terre à sa solution analytique complexe, puis deux prises de terre à leur
