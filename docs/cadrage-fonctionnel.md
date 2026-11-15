@@ -390,15 +390,15 @@ les matrices symétriques et les pertes cuivre dans son domaine actuel.
 Un premier moteur déséquilibré ABC/ABCN couvre désormais les départs radiaux
 avec source équivalente secondaire, neutre explicite et prises de terre aval
 sur une référence équipotentielle propre à chaque zone galvanique. Il franchit
-aussi un transformateur Dyn
+aussi les transformateurs Dyn et Yzn
 HTA/BT à secondaire directement mis à la terre, en appliquant rapport, prise
 fixe, déphasage, impédances directe/inverse et homopolaire. Les courants et pertes
 des lignes, transformateurs et terres sont séparés.
 Il est validé par des solutions analytiques monophasées et par comparaison au
 moteur équilibré sur un cas symétrique. Les terres BT sont désormais découpées
-en zones galvaniques ancrées à la source ou au secondaire Dyn. L'ancrage source
-accepte désormais une impédance complexe non nulle. Les autres couplages de
-transformateurs, les modèles de sol détaillés, les calculs maillés et les
+en zones galvaniques ancrées à la source ou au secondaire Dyn/Yzn. L'ancrage
+source accepte désormais une impédance complexe non nulle. Les modèles de sol
+détaillés, les calculs maillés et les
 courts-circuits restent à développer.
 Voir le [premier jalon ABCN](calcul-desequilibre.md) pour ses limites précises.
 Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventions
@@ -418,7 +418,7 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | A — Spécification numérique | Modèles, conventions et cas de référence | Socle établi ; à compléter pour chaque nouveau calcul avec résultats attendus et tolérances |
 | A bis — Contrat de données | Objets, instantanés, versions et lots documentés | Socle opérationnel ; compacité et montée en charge encore à mesurer |
 | B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; cas maillés et validation indépendante restant à couvrir |
-| C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial, terres multi-zones, neutre source impédant et premier Dyn disponibles ; autres couplages et mailles à compléter |
+| C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial, terres multi-zones, neutre source impédant et groupes Dyn/Yzn disponibles ; cas rural indépendant et mailles à compléter |
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Défauts supportés validés, cas min/max et contributions vérifiés |
 | E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
@@ -427,9 +427,8 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 
 ### Ordre proposé des prochains jalons
 
-1. **Achever C — modèle déséquilibré de distribution** : autres couplages
-   réellement requis,
-   puis cas rural HTA/BT complet avec comparaison indépendante.
+1. **Achever C — modèle déséquilibré de distribution** : cas rural HTA/BT
+   complet avec comparaison indépendante.
 2. **Achever B/C — topologies d'exploitation** : calcul des réseaux maillés dans
    le domaine retenu, îlots et configurations avec points de coupure, sans
    confondre une maille dessinée et une maille effectivement fermée.

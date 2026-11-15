@@ -252,6 +252,26 @@ pub fn dyn_transformer() -> Network {
     n
 }
 
+/// Synthetic Yzn11 HTA/BT case with the same unequal phase-to-neutral loads.
+pub fn yzn_transformer() -> Network {
+    let mut n = dyn_transformer();
+    n.name = "Référence synthétique — transformateur Yzn11 déséquilibré".into();
+    let transformer = n
+        .objects
+        .values_mut()
+        .find(|object| matches!(object.equipment, Equipment::Transformer { .. }))
+        .unwrap();
+    transformer.name = "Transformateur analytique Yzn11".into();
+    let Some(ElectricalData::Transformer(data)) = &mut transformer.electrical else {
+        unreachable!()
+    };
+    data.from.connection = WindingConnection::Star;
+    data.from.neutral_terminal = false;
+    data.from.grounding = Grounding::Isolated;
+    data.to.connection = WindingConnection::Zigzag;
+    n
+}
+
 /// Synthetic Dyn11 case followed by a four-wire BT cable and a terminal earth electrode.
 pub fn dyn_grounded_transformer() -> Network {
     let mut n = dyn_transformer();

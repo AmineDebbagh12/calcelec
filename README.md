@@ -5,7 +5,7 @@ HTA/BT, avec la France et Enedis comme référence métier.
 
 **État : prototype avec toolbox géographique, modélisation, partage et répartition de puissance AC
 équilibrée sur réseaux radiaux, plus un moteur déséquilibré ABC/ABCN couvrant
-les départs BT et un premier transformateur Dyn HTA/BT. Les courts-circuits
+les départs BT et les transformateurs Dyn/Yzn HTA/BT. Les courts-circuits
 restent à implémenter.**
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
@@ -106,17 +106,19 @@ version. Les structures préremplies sont provisoires et doivent être vérifié
 Les données inconnues des anciens projets restent absentes ; l'application les
 signale dans **Données détaillées** et la commande `--check`.
 
-Cinq cas synthétiques sont notamment fournis :
+Six cas synthétiques sont notamment fournis :
 [ligne quatre conducteurs](examples/reference-four-wire.json) et
 [transformateur équilibré avec pertes cuivre](examples/reference-transformer.json),
 ainsi qu'un [transformateur Dyn11 déséquilibré](examples/reference-dyn-transformer.json).
+Le [transformateur Yzn11 déséquilibré](examples/reference-yzn-transformer.json)
+vérifie le chemin homopolaire local fourni par son secondaire zigzag.
 Le cas [Dyn11 avec câble et terre BT aval](examples/reference-dyn-grounded.json)
 vérifie en plus la séparation des zones galvaniques de terre.
 Le cas [BT avec terre source impédante](examples/reference-source-grounded-bt.json)
 vérifie le potentiel et les pertes de l'ancrage source.
 Ils se calculent sans les options de simplification. Le moteur exploite leurs
 matrices et résistances ; le moteur déséquilibré applique aussi le rapport, la
-prise fixe, le déphasage horaire et l'impédance homopolaire du cas Dyn pris en charge.
+prise fixe, le déphasage horaire et l'impédance homopolaire des cas Dyn/Yzn pris en charge.
 La [description du modèle électrique](docs/modele-electrique.md) précise les
 unités, conventions, limites et contrôles analytiques.
 
@@ -162,11 +164,11 @@ raccordé à la terre directement ou par une impédance complexe, et des prises 
 terre aval sur une référence commune à leur zone galvanique. L'impédance source
 doit être identique dans les données du bus et de la source.
 Le tableau **Prises de terre du neutre** distingue leurs courants, potentiels
-et pertes. Il accepte également un franchissement HTA/BT Dyn : bus HTA ABC,
-secondaire étoile ABCN directement mis à la terre, excitation nulle et impédance
+et pertes. Il accepte également un franchissement HTA/BT Dyn ou Yzn : bus HTA
+ABC, secondaire ABCN directement mis à la terre, excitation nulle et impédance
 homopolaire déclarée. Les prises de terre supplémentaires derrière ce
-transformateur sont résolues dans une zone galvanique ancrée à son point étoile,
-sans faire traverser le triangle au courant de neutre. Les autres couplages,
+transformateur sont résolues dans une zone galvanique ancrée à son neutre BT,
+sans faire remonter le courant homopolaire sur les conducteurs HTA. Les autres couplages,
 les shunts, phases manquantes et points étoile
 flottants restent refusés. L'exemple rural complet reste donc à calculer avec
 le moteur équilibré simplifié ; il ne doit pas être converti implicitement.
@@ -179,6 +181,8 @@ Le modèle ne décrit pas les potentiels locaux du sol ni les couplages entre
 électrodes. Voir le [domaine et les validations du moteur déséquilibré](docs/calcul-desequilibre.md).
 Le cas `examples/reference-dyn-transformer.json` vérifie un Dyn11 20 kV/400 V
 alimentant trois charges monophasées différentes.
+Le cas `examples/reference-yzn-transformer.json` reprend ces charges avec un
+primaire étoile isolé et un secondaire zigzag Yzn11.
 Le cas `examples/reference-dyn-grounded.json` ajoute un câble ABCN de 50 m et
 une terre terminale de 1 ohm ; son courant est compensé à l'ancrage du Dyn.
 
@@ -212,6 +216,7 @@ cargo run -- --load-flow examples/reference-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-unbalanced-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-grounded-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-dyn-transformer.json
+cargo run -- --unbalanced-load-flow examples/reference-yzn-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-dyn-grounded.json
 cargo run -- --unbalanced-load-flow examples/reference-source-grounded-bt.json
 ```
@@ -242,9 +247,8 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Étendre le calcul déséquilibré aux autres couplages de transformateurs et aux
-  modèles de sol plus détaillés, puis couvrir les réseaux maillés et les
-  courts-circuits.
+- Valider le calcul déséquilibré sur un cas rural HTA/BT indépendant, puis
+  couvrir les réseaux maillés, les modèles de sol détaillés et les courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

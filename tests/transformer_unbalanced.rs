@@ -174,6 +174,67 @@ fn dyn11_unbalanced_case_blocks_homopolar_current_upstream_and_balances_power() 
 }
 
 #[test]
+fn yzn11_supplies_zero_sequence_locally_and_blocks_it_on_the_hta_conductors() {
+    let network = reference_cases::yzn_transformer();
+    let result = unbalanced::solve(&network, &Options::default()).unwrap();
+    let branch = &result.branches[0];
+    let upstream_sum = branch.currents_from_a[..3]
+        .iter()
+        .copied()
+        .fold(Phasor { re: 0.0, im: 0.0 }, add);
+    near(upstream_sum.magnitude(), 0.0, 1e-10);
+    near(branch.currents_from_a[3].magnitude(), 0.0, 1e-12);
+    let downstream_phases = branch.currents_to_a[..3]
+        .iter()
+        .copied()
+        .fold(Phasor { re: 0.0, im: 0.0 }, add);
+    assert!(downstream_phases.magnitude() > 1.0);
+    near(
+        downstream_phases.re + branch.currents_to_a[3].re,
+        0.0,
+        1e-10,
+    );
+    near(
+        downstream_phases.im + branch.currents_to_a[3].im,
+        0.0,
+        1e-10,
+    );
+    assert!(result.transformer_loss_w > 0.0);
+    assert!(result.balance_error_va < 1e-3);
+
+    let secondary = network
+        .objects
+        .values()
+        .find(|object| object.name == "Secondaire 400 V")
+        .unwrap()
+        .id;
+    let anchor = result
+        .groundings
+        .iter()
+        .find(|ground| ground.bus_id == secondary)
+        .unwrap();
+    near(anchor.voltage_v.magnitude(), 0.0, 1e-12);
+    near(anchor.current_to_earth_a.magnitude(), 0.0, 1e-12);
+
+    let mut no_load = network.clone();
+    no_load
+        .objects
+        .retain(|_, object| !matches!(object.equipment, Equipment::Load { .. }));
+    let no_load_result = unbalanced::solve(&no_load, &Options::default()).unwrap();
+    let secondary_result = no_load_result
+        .buses
+        .iter()
+        .find(|bus| bus.id == secondary)
+        .unwrap();
+    near(
+        secondary_result.phase_neutral[0].magnitude_v,
+        400.0 / 3.0_f64.sqrt(),
+        1e-9,
+    );
+    near(secondary_result.phase_neutral[0].angle_deg, 30.0, 1e-10);
+}
+
+#[test]
 fn three_wire_hta_line_can_feed_the_dyn_boundary_without_a_fictitious_neutral() {
     let mut network = reference_cases::dyn_transformer();
     let primary = network
@@ -292,6 +353,23 @@ fn unsupported_transformer_models_are_rejected_explicitly() {
     };
     data.zero_sequence_ohm_referred_from = Some(Impedance::ZERO);
     assert!(unbalanced::solve(&network, &Options::default()).is_ok());
+
+    let mut network = reference_cases::yzn_transformer();
+    let transformer = network
+        .objects
+        .values_mut()
+        .find(|object| matches!(object.equipment, Equipment::Transformer { .. }))
+        .unwrap();
+    let Some(ElectricalData::Transformer(data)) = &mut transformer.electrical else {
+        unreachable!()
+    };
+    data.from.grounding = Grounding::Impedance {
+        ohm: Impedance::ZERO,
+    };
+    assert!(matches!(
+        unbalanced::solve(&network, &Options::default()),
+        Err(CalculationError::Unsupported(message)) if message.contains("primaire Y")
+    ));
 }
 
 #[test]

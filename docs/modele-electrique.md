@@ -161,13 +161,14 @@ aux matrices et aux enroulements restent à améliorer.
 
 ## Cas de référence et validation
 
-Cinq projets autonomes ciblent les modèles détaillés dans `examples/` :
+Six projets autonomes ciblent les modèles détaillés dans `examples/` :
 
 | Cas | Modèle et contrôle analytique |
 | --- | --- |
 | `reference-four-wire.json` | Ligne ABCN de 100 m, matrice 4×4 réciproque et passive ; réduction directe 0,38 + j0,06 ohm/km ; charge triphasée 30 kW ; solution analytique complexe à deux nœuds |
 | `reference-transformer.json` | Transformateur Yyn0 20 kV/400 V, 100 kVA, uk 4 %, pertes cuivre assignées 1 kW, excitation explicitement nulle ; charge 30 kW + j9 kvar ; solution analytique par l'impédance série ramenée au secondaire |
 | `reference-dyn-transformer.json` | Transformateur Dyn11 20 kV/400 V avec trois charges monophasées différentes ; rapport, déphasage, séquences directe/inverse/homopolaire, courants des deux côtés et pertes vérifiés |
+| `reference-yzn-transformer.json` | Transformateur Yzn11 20 kV/400 V avec primaire étoile isolé et secondaire zigzag mis à la terre ; courant homopolaire BT local, blocage sur les conducteurs HTA, déphasage et pertes vérifiés |
 | `reference-dyn-grounded.json` | Même Dyn11 suivi d'un câble ABCN de 50 m et d'une prise de terre terminale ; courant d'électrode, compensation au point étoile, tensions et pertes vérifiés dans la zone BT |
 | `reference-source-grounded-bt.json` | Départ BT déséquilibré avec deux terres aval et résistance de terre source de 0,2 ohm ; déplacement du neutre source, partage des courants et pertes vérifiés |
 
@@ -176,10 +177,10 @@ Les tests vérifient tensions, angles, courants et pertes face aux solutions
 analytiques, et le refus des modèles incompatibles ou non supportés. Ils
 couvrent aussi les permutations d'ordre de conducteurs, les données invalides,
 les migrations et les échanges/annulations/stockages des modifications détaillées.
-Le moteur déséquilibré exploite les matrices ABCN et un premier modèle Dyn HTA/BT
+Le moteur déséquilibré exploite les matrices ABCN et les modèles Dyn/Yzn HTA/BT
 sur des départs radiaux, avec neutre BT explicitement représenté ; voir le
-[jalon déséquilibré](calcul-desequilibre.md). Son extension aux autres couplages
-et aux modèles de sol détaillés, la comparaison à des outils indépendants et la validation
+[jalon déséquilibré](calcul-desequilibre.md). Son extension aux modèles de sol
+détaillés, la comparaison à des outils indépendants et la validation
 normative des calculs de courts-circuits restent à réaliser.
 
 Références de formulation consultées : [matrices de ligne OpenDSS / EPRI](https://opendss.epri.com/Properties14.html),

@@ -184,6 +184,9 @@ compensation, opposé à la somme des électrodes de sa zone.
 La version `radial-four-wire-0.5` exploite l'impédance de terre du neutre source
 déjà présente au schéma 4. L'ancrage source peut donc publier une tension et des
 pertes non nulles ; sa déclaration doit être identique sur la source et son bus.
+La version `radial-four-wire-0.6` ajoute le groupe Yzn au même contrat de résultat :
+son secondaire zigzag mis à la terre définit une zone galvanique, tandis que le
+primaire étoile isolé ne transmet pas le courant homopolaire aux conducteurs HTA.
 Le champ historique `currents_a` conserve le courant côté aval. Les lecteurs de
 résultats doivent tenir compte de la version du moteur : le type 0.3 et les
 suivants exigent les nouveaux champs, sans valeur inventée à la lecture d'un

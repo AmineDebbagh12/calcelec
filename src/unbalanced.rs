@@ -17,7 +17,7 @@ use std::{
 mod grounding;
 use grounding::GroundSystem;
 const CONDUCTORS: [Conductor; 4] = [Conductor::A, Conductor::B, Conductor::C, Conductor::N];
-pub const SOLVER_VERSION: &str = "radial-four-wire-0.5";
+pub const SOLVER_VERSION: &str = "radial-four-wire-0.6";
 type Vector = [C; 4];
 type Matrix = [[C; 4]; 4];
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -181,7 +181,7 @@ fn phase_index(phase: Conductor) -> usize {
 #[derive(Clone, Copy)]
 enum EdgeModel {
     Line(Matrix),
-    Dyn {
+    GroundedSecondary {
         ratio: f64,
         shift: C,
         z_positive_to_ohm: C,
@@ -199,7 +199,7 @@ impl Edge {
     fn upstream_current(&self, downstream: Vector) -> Vector {
         match self.model {
             EdgeModel::Line(_) => downstream,
-            EdgeModel::Dyn { ratio, shift, .. } => {
+            EdgeModel::GroundedSecondary { ratio, shift, .. } => {
                 let sequence = phase_to_sequence(downstream);
                 let upstream_sequence = [
                     C::default(),
@@ -218,7 +218,7 @@ impl Edge {
                 upstream[k]
                     - (0..4).fold(C::default(), |sum, j| sum + z[k][j] * downstream_current[j])
             }),
-            EdgeModel::Dyn {
+            EdgeModel::GroundedSecondary {
                 ratio,
                 shift,
                 z_positive_to_ohm,
@@ -242,11 +242,11 @@ impl Edge {
     fn neutral_impedance(&self) -> Option<C> {
         match self.model {
             EdgeModel::Line(z) => Some(z[3][3]),
-            EdgeModel::Dyn { .. } => None,
+            EdgeModel::GroundedSecondary { .. } => None,
         }
     }
     fn transformer(&self) -> bool {
-        matches!(self.model, EdgeModel::Dyn { .. })
+        matches!(self.model, EdgeModel::GroundedSecondary { .. })
     }
     fn loading(&self, upstream: Vector, downstream: Vector) -> Option<f64> {
         self.current_limits.map(|(from, to)| {
@@ -284,19 +284,21 @@ fn sequence_to_phase(value: [C; 3]) -> Vector {
         C::default(),
     ]
 }
-fn dyn_model(
+fn grounded_secondary_transformer_model(
     name: &str,
     data: &TransformerData,
     rated_va: f64,
     uk_percent: f64,
 ) -> Result<EdgeModel> {
-    if data.from.connection != WindingConnection::Delta
-        || data.to.connection != WindingConnection::Star
-        || !data.to.neutral_terminal
-        || !grounded(&data.to.grounding)
-    {
+    let dyn_group = data.from.connection == WindingConnection::Delta
+        && data.to.connection == WindingConnection::Star;
+    let yzn_group = data.from.connection == WindingConnection::Star
+        && !data.from.neutral_terminal
+        && data.from.grounding == Grounding::Isolated
+        && data.to.connection == WindingConnection::Zigzag;
+    if (!dyn_group && !yzn_group) || !data.to.neutral_terminal || !grounded(&data.to.grounding) {
         return Err(unsupported(format!(
-            "{name} : ce jalon couvre uniquement un transformateur Dyn avec neutre BT exposé et directement mis à la terre"
+            "{name} : ce jalon couvre les transformateurs Dyn et Yzn, avec neutre BT exposé et directement mis à la terre ; le primaire Y de Yzn doit rester isolé sans borne N"
         )));
     }
     if data.iron_loss_w != Some(0.0) || data.no_load_current_percent != Some(0.0) {
@@ -313,7 +315,7 @@ fn dyn_model(
     let series = data.series_pu(rated_va, uk_percent)?;
     let base_to = data.to.rated_voltage_ll_v.powi(2) / rated_va;
     let angle = data.phase_shift_deg().to_radians();
-    Ok(EdgeModel::Dyn {
+    Ok(EdgeModel::GroundedSecondary {
         ratio,
         shift: C::new(angle.cos(), angle.sin()),
         z_positive_to_ohm: C::new(series.r * base_to, series.x * base_to),
@@ -547,7 +549,8 @@ impl Circuit {
                             o.name
                         )));
                     }
-                    let model = dyn_model(&o.name, data, rated_va, uk_percent)?;
+                    let model =
+                        grounded_secondary_transformer_model(&o.name, data, rated_va, uk_percent)?;
                     let from_limit = rated_va / (3.0_f64.sqrt() * data.from.rated_voltage_ll_v);
                     let to_limit = rated_va / (3.0_f64.sqrt() * data.to.rated_voltage_ll_v);
                     edges.push(Edge {
@@ -638,7 +641,7 @@ impl Circuit {
             if edge.transformer() {
                 if edge.a != *parent_node || edge.b != node {
                     return Err(unsupported(format!(
-                        "{} : le transformateur Dyn doit être orienté du réseau HTA amont vers le réseau BT aval",
+                        "{} : le transformateur Dyn/Yzn doit être orienté du réseau HTA amont vers le réseau BT aval",
                         network.objects[&edge.id].name
                     )));
                 }
@@ -669,7 +672,7 @@ impl Circuit {
             if transformer_boundaries.contains(&node) {
                 if !grounded(&data.neutral_grounding) {
                     return Err(unsupported(format!(
-                        "{name} : le neutre au secondaire Dyn doit être directement mis à la terre"
+                        "{name} : le neutre au secondaire Dyn/Yzn doit être directement mis à la terre"
                     )));
                 }
                 continue;
@@ -1041,8 +1044,8 @@ pub fn solve_cancellable(
             grounding_loss_w:grounding_loss.re,grounding_loss_var:grounding_loss.im,groundings,buses,branches,
             assumptions:vec![
                 "Réseau radial ABC/ABCN, matrices primitives complètes et source de tension équilibrée idéale.".into(),
-                "Prises de terre résolues par zones galvaniques indépendantes, ancrées au neutre source avec son impédance déclarée ou au point étoile Dyn idéal ; chaque zone utilise une référence équipotentielle, sans couplage de sol entre zones ou électrodes.".into(),
-                "Transformateurs couverts : Dyn HTA/BT, secondaire étoile à neutre directement mis à la terre, excitation nulle et impédance homopolaire déclarée.".into(),
+                "Prises de terre résolues par zones galvaniques indépendantes, ancrées au neutre source avec son impédance déclarée ou au neutre BT Dyn/Yzn idéal ; chaque zone utilise une référence équipotentielle, sans couplage de sol entre zones ou électrodes.".into(),
+                "Transformateurs couverts : Dyn et Yzn HTA/BT, secondaire à neutre directement mis à la terre, excitation nulle et impédance homopolaire déclarée ; le primaire étoile Yzn est isolé sans borne N.".into(),
                 "Aucun shunt de ligne ni point étoile flottant. Impédances de source de défaut non utilisées en régime permanent.".into(),
                 "Taux de charge : limite de ligne appliquée aux conducteurs et courants assignés des deux enroulements ; aucun calcul thermique ni harmonique.".into(),
             ],

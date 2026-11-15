@@ -30,13 +30,14 @@ fn command(args: &[String]) -> Result<()> {
                 "four-wire" => calcelec::reference_cases::four_wire(),
                 "transformer" => calcelec::reference_cases::transformer(),
                 "dyn-transformer" => calcelec::reference_cases::dyn_transformer(),
+                "yzn-transformer" => calcelec::reference_cases::yzn_transformer(),
                 "dyn-grounded" => calcelec::reference_cases::dyn_grounded_transformer(),
                 "unbalanced-bt" => calcelec::reference_cases::unbalanced_bt(),
                 "grounded-bt" => calcelec::reference_cases::grounded_bt(),
                 "source-grounded-bt" => calcelec::reference_cases::source_grounded_bt(),
                 _ => {
                     return Err(calcelec::model::Error::Invalid(
-                        "référence attendue : four-wire, transformer, dyn-transformer, dyn-grounded, unbalanced-bt, grounded-bt ou source-grounded-bt"
+                        "référence attendue : four-wire, transformer, dyn-transformer, yzn-transformer, dyn-grounded, unbalanced-bt, grounded-bt ou source-grounded-bt"
                             .into(),
                     ));
                 }
@@ -81,7 +82,7 @@ fn command(args: &[String]) -> Result<()> {
             println!("Version reconstruite : {}", project.head());
         }
         _ => println!(
-            "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --apply base.json lot.json résultat.json\n  cargo run -- --load-flow projet.json [--simplified]  Calcul AC radial, résultats JSON sur stdout\n  cargo run -- --unbalanced-load-flow projet.json  Calcul AC ABCN radial, résultats JSON sur stdout\n  cargo run -- --reference-case four-wire|transformer|dyn-transformer|dyn-grounded|unbalanced-bt|grounded-bt|source-grounded-bt projet.json\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
+            "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --apply base.json lot.json résultat.json\n  cargo run -- --load-flow projet.json [--simplified]  Calcul AC radial, résultats JSON sur stdout\n  cargo run -- --unbalanced-load-flow projet.json  Calcul AC ABCN radial, résultats JSON sur stdout\n  cargo run -- --reference-case four-wire|transformer|dyn-transformer|yzn-transformer|dyn-grounded|unbalanced-bt|grounded-bt|source-grounded-bt projet.json\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
         ),
     }
     Ok(())

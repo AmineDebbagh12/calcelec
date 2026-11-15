@@ -212,7 +212,7 @@ mod tests {
             id: Id::new_v4(),
             a,
             b,
-            model: super::super::EdgeModel::Dyn {
+            model: super::super::EdgeModel::GroundedSecondary {
                 ratio: 1.0,
                 shift: C::new(1.0, 0.0),
                 z_positive_to_ohm: C::default(),

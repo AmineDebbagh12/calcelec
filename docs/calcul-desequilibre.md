@@ -1,8 +1,8 @@
 # Régime permanent déséquilibré — réseau radial ABC/ABCN
 
-Moteur : `radial-four-wire-0.5`, dans `src/unbalanced.rs`.
-Il couvre les réseaux radiaux BT à quatre conducteurs et un premier franchissement
-HTA/BT Dyn depuis un réseau amont ABC alimenté par une source équilibrée idéale.
+Moteur : `radial-four-wire-0.6`, dans `src/unbalanced.rs`.
+Il couvre les réseaux radiaux BT à quatre conducteurs et les franchissements
+HTA/BT Dyn/Yzn depuis un réseau amont ABC alimenté par une source équilibrée idéale.
 Le neutre BT est représenté sans élimination, avec ses impédances propres et ses
 couplages aux phases.
 Ce jalon est une première partie du moteur HTA/BT déséquilibré prévu pour la V1.
@@ -22,10 +22,11 @@ Ce jalon est une première partie du moteur HTA/BT déséquilibré prévu pour l
   peuvent être dissymétriques entre phases et posséder des couplages mutuels,
   sous réserve des contrôles de réciprocité et de passivité du modèle.
 - Interrupteurs fermés ABC ou ABCN idéaux ; les interrupteurs ouverts sont exclus.
-- Transformateur Dyn orienté HTA vers BT, côté HTA delta ABC, côté BT étoile
-  ABCN avec neutre exposé et directement mis à la terre. Tensions assignées
-  cohérentes avec les bus, pertes fer et courant à vide explicitement nuls,
-  impédance homopolaire renseignée et prise fixe autorisée.
+- Transformateur Dyn ou Yzn orienté HTA vers BT. Dyn utilise un primaire delta
+  et un secondaire étoile ; Yzn utilise un primaire étoile isolé sans borne N et
+  un secondaire zigzag. Dans les deux cas, le neutre BT est exposé et directement
+  mis à la terre. Tensions assignées cohérentes avec les bus, pertes fer et courant
+  à vide explicitement nuls, impédance homopolaire renseignée et prise fixe autorisée.
 - Charges et productions P/Q constantes avec connexion détaillée phase-neutre,
   entre phases, étoile triphasée avec neutre ou triangle triphasé.
 - Réseau en service connecté, sans boucle ni branche parallèle fermée.
@@ -39,8 +40,8 @@ Ils sont refusés explicitement. Les objets hors service et les branchements
 à des bus hors service sont exclus du calcul, comme pour le moteur équilibré.
 
 Pour étudier un départ BT sans poste explicite, placer la frontière amont à
-l'équivalent source du secondaire. Le modèle Dyn permet sinon de partir du bus
-HTA amont. Les impédances de séquence de la source et les contributions
+l'équivalent source du secondaire. Les modèles Dyn/Yzn permettent sinon de
+partir du bus HTA amont. Les impédances de séquence de la source et les contributions
 au défaut sont conservées comme données mais ne sont pas utilisées ici.
 Les harmoniques, courants de fuite et potentiels locaux du sol ne sont pas
 calculés. Dans chaque zone galvanique, les courants de retour par les impédances
@@ -96,7 +97,7 @@ les [conventions OpenDSS / EPRI](https://opendss.epri.com/NeutralRules.html).
 L'implémentation et les validations de CalcElec sont propres au projet ; aucune
 comparaison numérique avec ces outils n'a encore été effectuée.
 
-## Transformateur Dyn — extensions 0.3 et 0.4
+## Transformateurs Dyn et Yzn — extensions 0.3, 0.4 et 0.6
 
 Le côté BT est ramené en composantes symétriques. Avec `a = exp(j120°)`, les
 composantes sont calculées explicitement depuis A/B/C. Le rapport `r` inclut la
@@ -115,15 +116,20 @@ I0_HTA = 0
 
 `Z1_BT` provient de uk et des pertes cuivre sur la base triphasée assignée,
 ramenée en ohms au secondaire. `Z0_BT` est l'impédance homopolaire déclarée côté
-HTA divisée par `r²`. Le triangle bloque le courant homopolaire dans les lignes
-HTA ; le modèle conserve son effet sur les tensions et pertes BT. Les courants
-des deux enroulements sont donc distincts et exportés séparément.
+HTA divisée par `r²`. Le delta du Dyn ou le primaire étoile isolé du Yzn bloque
+le courant homopolaire dans les lignes HTA ; le modèle conserve son effet sur
+les tensions et pertes BT. Les courants des deux enroulements sont donc distincts
+et exportés séparément.
 
 Le secondaire constitue une frontière de terre idéale avec `VN = 0`. Le courant
-de neutre métallique rejoint le point étoile ; il ne doit pas être confondu avec
-un courant d'électrode. Depuis la version 0.4, les prises de terre supplémentaires
-en aval sont résolues dans une zone galvanique ancrée à ce point étoile. Leurs
-courants de neutre s'arrêtent à cet ancrage et ne traversent jamais le delta.
+de neutre métallique rejoint le point neutre étoile ou zigzag ; il ne doit pas
+être confondu avec un courant d'électrode. Depuis la version 0.4, les prises de terre supplémentaires
+en aval sont résolues dans une zone galvanique ancrée à ce neutre. Leurs courants
+homopolaires s'arrêtent à cet ancrage et ne remontent pas dans les trois conducteurs
+HTA. Pour Yzn, le primaire étoile doit rester isolé et sans borne neutre ; le
+secondaire zigzag fournit le chemin homopolaire local.
+Le choix de Yzn comme second groupe de distribution s'appuie notamment sur les
+[groupes de transformateurs de distribution décrits par Schneider Electric](https://www.se.com/es/es/faqs/FA221852/).
 
 Le modèle reste un équivalent de séquences : pas de saturation, excitation,
 couplage magnétique détaillé du noyau ni harmoniques. Le rôle du delta dans le
@@ -132,13 +138,13 @@ blocage homopolaire et l'importance des données de noyau sont documentés par l
 et sa note sur les [effets de noyau](https://opendss.epri.com/ModelingTransformerCoreEffectsin.html).
 CalcElec ne revendique pas une équivalence complète avec ce modèle nodal général.
 
-## Prises de terre du neutre — extensions 0.2, 0.4 et 0.5
+## Prises de terre du neutre — extensions 0.2, 0.4, 0.5 et 0.6
 
 Les prises de terre aval sont connectées à une **référence de terre commune
 équipotentielle dans leur zone galvanique**. Chacune porte son impédance complexe
-déclarée, avec R non négative et X signée. Le point étoile Dyn garde une liaison
-idéale ; l'ancrage source utilise son impédance déclarée. Les impédances et potentiels
-propres au sol entre électrodes,
+déclarée, avec R non négative et X signée. Le neutre BT Dyn/Yzn garde une liaison
+idéale ; l'ancrage source utilise son impédance déclarée. Les impédances et
+potentiels propres au sol entre électrodes,
 les tensions de contact et les couplages entre électrodes ne sont pas modélisés.
 La tension VN publiée est relative à la référence commune, pas une mesure du
 potentiel du sol local.
@@ -154,7 +160,7 @@ Vneutre[i] = Zterre[i] × g[i]
 ```
 
 Chaque électrode est affectée à l'ancrage le plus proche en remontant le réseau :
-neutre de la source, éventuellement impédant, ou point étoile idéal d'un Dyn.
+neutre de la source, éventuellement impédant, ou neutre BT idéal d'un Dyn/Yzn.
 Les termes `H[i,j]` sont
 nuls entre deux zones différentes. La matrice globale est donc formée de blocs
 galvaniquement indépendants, même si elle est factorisée en une seule opération.
@@ -179,7 +185,7 @@ il ne s'agit pas d'une taille maximale annoncée pour la V1.
 Le courant de chaque ancrage est l'opposé de la somme des courants des prises
 aval de sa zone. Il ferme localement le bilan des courants de terre. Un ancrage
 source impédant vérifie `VN = Zancrage × Iancrage` et sa puissance est incluse
-dans les pertes ; un point étoile Dyn idéal conserve `VN = 0` et des pertes nulles.
+dans les pertes ; un neutre BT Dyn/Yzn idéal conserve `VN = 0` et des pertes nulles.
 Les impédances des terres aval consomment `Zterre × |g|²` : cette puissance est
 incluse dans le bilan global, séparément des pertes des lignes. Une réactance
 capacitive peut fournir une puissance réactive, qui reste signée dans le résultat.
@@ -222,6 +228,8 @@ La version 0.4 conserve le format et publie, dans `groundings`, chaque ancrage
 de zone avec `VN = 0` et le courant opposé à la somme de ses électrodes.
 La version 0.5 conserve encore ce format et autorise une tension et des pertes
 non nulles pour l'ancrage source impédant.
+La version 0.6 ajoute Yzn avec le même format de sortie et les mêmes champs de
+pertes, tensions et courants sur les deux côtés du transformateur.
 
 Le taux de charge d'une ligne est le maximum des modules de courant rapporté à
 `max_current_a`. Celui d'un transformateur est le maximum des taux des phases
@@ -282,6 +290,22 @@ des lignes HTA et leur conducteur N restent nuls ; le bilan est inférieur à
 0,001 VA. Le cas à vide vérifie séparément 400/sqrt(3) V et le déphasage +30°.
 Les valeurs sont destinées à la validation logicielle, pas à un catalogue Enedis.
 
+## Exemple Yzn11 HTA/BT
+
+Ouvrir `examples/reference-yzn-transformer.json` pour reprendre le cas Dyn11
+avec un primaire étoile isolé et un secondaire zigzag directement mis à la terre.
+
+```sh
+cargo run -- --unbalanced-load-flow examples/reference-yzn-transformer.json
+cargo run -- --reference-case yzn-transformer nouveau-projet.json
+```
+
+Le calcul initial converge en 4 itérations. Les tensions A-N/B-N/C-N sont proches
+de 229,608 / 230,087 / 230,435 V. La somme des courants de phase HTA reste nulle,
+alors que le courant homopolaire BT est repris localement par le neutre zigzag.
+Les pertes du transformateur sont proches de 71,972 W et 278,251 var ; l'erreur
+de bilan reste inférieure à 0,001 VA.
+
 ## Exemple Dyn11 avec terre BT aval
 
 Ouvrir `examples/reference-dyn-grounded.json` pour tester le franchissement
@@ -339,7 +363,8 @@ neutre/terre à sa solution analytique complexe, puis deux prises de terre à le
 les connexions idéales redondantes, les impédances capacitives, les lois de
 Kirchhoff avec couplages mutuels, la séparation des pertes et l'affichage des
 résultats. Un test matriciel vérifie aussi que deux zones séparées forment des
-blocs indépendants, et le cas Dyn vérifie les lois de Kirchhoff et les pertes.
+blocs indépendants, et les cas Dyn/Yzn vérifient les lois de Kirchhoff et les pertes.
 Le partage entre conducteur N et chemin de terre avec ancrage source impédant
-est comparé à une solution analytique complexe. Les autres couplages de
-transformateurs et le modèle de sol détaillé restent des extensions à réaliser.
+est comparé à une solution analytique complexe. Le modèle de sol détaillé et les
+autres couplages qui seraient retenus au-delà du périmètre Dyn/Yzn restent des
+extensions à réaliser.
