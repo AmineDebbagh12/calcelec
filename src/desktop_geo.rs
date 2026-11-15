@@ -54,8 +54,14 @@ impl MapResults<'_> {
                 .iter()
                 .find(|b| b.id == id)
                 .map(|b| {
+                    let earth = r
+                        .groundings
+                        .iter()
+                        .find(|g| g.bus_id == id)
+                        .map(|g| format!(" · I terre {:.3} A", g.current_to_earth_a.magnitude()))
+                        .unwrap_or_default();
                     format!(
-                        "A-N {:.2} V · B-N {:.2} V · C-N {:.2} V · VN {:.3} V",
+                        "A-N {:.2} V · B-N {:.2} V · C-N {:.2} V · VN {:.3} V{earth}",
                         b.phase_neutral[0].magnitude_v,
                         b.phase_neutral[1].magnitude_v,
                         b.phase_neutral[2].magnitude_v,

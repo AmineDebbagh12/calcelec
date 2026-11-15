@@ -174,7 +174,13 @@ schéma 4 du réseau et n'est pas encore persisté dans SQLite. Voir le
 Le résultat du [moteur déséquilibré](calcul-desequilibre.md) utilise la même
 traçabilité avec ses propres options et son `solver_version`. Il exporte des
 phaseurs et des tableaux A/B/C/N, des tensions phase-neutre et composées,
-le potentiel du neutre et U2/U1. Le schéma de réseau reste inchangé.
+le potentiel du neutre et U2/U1. La version de moteur `radial-four-wire-0.2`
+ajoute les prises de terre (`groundings`) et sépare pertes des lignes, pertes des
+terres et pertes totales. Les lecteurs de résultats doivent tenir compte de la
+version du moteur : le type de résultat 0.2 exige ces nouveaux champs. Le schéma
+de réseau reste inchangé en version 4 ; les anciennes déclarations de terres,
+auparavant refusées au calcul, sont maintenant exploitées dans le domaine pris
+en charge.
 
 - Pas encore d'empreinte cryptographique, de signature ou d'authentification :
   les UUID identifient les versions mais ne certifient pas leur contenu.

@@ -358,10 +358,13 @@ Les données détaillées de phases, neutre, matrices, couplages, prises et mise
 avec deux cas synthétiques à solution analytique. Le moteur équilibré exploite
 les matrices symétriques et les pertes cuivre dans son domaine actuel.
 Un premier moteur BT déséquilibré ABCN couvre désormais les départs radiaux
-avec source équivalente secondaire, neutre explicite et sans prises de terre aval.
+avec source équivalente secondaire, neutre explicite et prises de terre aval
+sur une référence de terre commune. Les courants et pertes de terre sont résolus
+et séparés de ceux des lignes, avec validation analytique de retours parallèles.
 Il est validé par des solutions analytiques monophasées et par comparaison au
 moteur équilibré sur un cas symétrique. Les transformateurs en déséquilibré,
-terres distribuées, calculs maillés et courts-circuits restent à développer.
+la mise à la terre source par une impédance non nulle, les modèles de sol détaillés,
+les calculs maillés et les courts-circuits restent à développer.
 Voir le [premier jalon ABCN](calcul-desequilibre.md) pour ses limites précises.
 Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventions
 et les données encore à compléter.

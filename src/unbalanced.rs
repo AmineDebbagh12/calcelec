@@ -11,8 +11,10 @@ use std::{
     collections::{BTreeMap, VecDeque},
     sync::atomic::{AtomicBool, Ordering},
 };
+mod grounding;
+use grounding::GroundSystem;
 const CONDUCTORS: [Conductor; 4] = [Conductor::A, Conductor::B, Conductor::C, Conductor::N];
-pub const SOLVER_VERSION: &str = "radial-four-wire-0.1";
+pub const SOLVER_VERSION: &str = "radial-four-wire-0.2";
 type Vector = [C; 4];
 type Matrix = [[C; 4]; 4];
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -100,6 +102,15 @@ pub struct BranchResult {
     pub loading_percent: Option<f64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GroundingResult {
+    pub bus_id: Id,
+    /// Positive from the neutral towards the common earth reference.
+    pub current_to_earth_a: Phasor,
+    pub voltage_v: Phasor,
+    pub loss_w: f64,
+    pub loss_var: f64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LoadFlow {
     pub iterations: usize,
     pub residual_pu: f64,
@@ -110,6 +121,11 @@ pub struct LoadFlow {
     pub total_loss_w: f64,
     pub total_loss_var: f64,
     pub balance_error_va: f64,
+    pub line_loss_w: f64,
+    pub line_loss_var: f64,
+    pub grounding_loss_w: f64,
+    pub grounding_loss_var: f64,
+    pub groundings: Vec<GroundingResult>,
     pub buses: Vec<BusResult>,
     pub branches: Vec<BranchResult>,
     pub assumptions: Vec<String>,
@@ -166,6 +182,7 @@ struct Circuit {
     order: Vec<usize>,
     parent: Vec<Option<(usize, usize)>>,
     source: Vector,
+    earth: GroundSystem,
 }
 impl Circuit {
     fn build(network: &Network, cancel: &AtomicBool) -> Result<Self> {
@@ -215,6 +232,7 @@ impl Circuit {
                 "ce jalon ABCN exige une source idéale avec neutre directement à la terre",
             ));
         }
+        let mut earth = vec![];
         for (i, id) in buses.iter().enumerate() {
             let o = &network.objects[id];
             let Some(ElectricalData::Bus(data)) = &o.electrical else {
@@ -229,13 +247,24 @@ impl Circuit {
                     o.name
                 )));
             }
-            if (i == root && !grounded(&data.neutral_grounding))
-                || (i != root && data.neutral_grounding != Grounding::Isolated)
-            {
-                return Err(unsupported(format!(
-                    "{} : seul le neutre source peut être mis à la terre dans ce jalon ; les prises de terre aval exigent un modèle supplémentaire",
-                    o.name
-                )));
+            if i == root {
+                if !grounded(&data.neutral_grounding) {
+                    return Err(unsupported(format!(
+                        "{} : le neutre source doit rester directement à la terre",
+                        o.name
+                    )));
+                }
+            } else {
+                match &data.neutral_grounding {
+                    Grounding::Isolated => {}
+                    Grounding::Impedance { ohm } => earth.push((i, C::new(ohm.r, ohm.x))),
+                    _ => {
+                        return Err(unsupported(format!(
+                            "{} : préciser l'impédance de terre du neutre ou déclarer l'absence de prise de terre locale",
+                            o.name
+                        )));
+                    }
+                }
             }
             if (nominal[i] / nominal[root] - 1.0).abs() > 1e-10 {
                 return Err(unsupported(
@@ -414,7 +443,9 @@ impl Circuit {
         if source.iter().any(|v| !v.finite()) {
             return Err(CalculationError::Numerical(buses[root]));
         }
+        let earth = GroundSystem::build(earth, &edges, &parent, cancel)?;
         Ok(Self {
+            earth,
             buses,
             nominal,
             edges,
@@ -480,6 +511,52 @@ impl Circuit {
         }
         Ok(currents)
     }
+    fn linear_step(
+        &self,
+        mut currents: Vec<Vector>,
+        cancel: &AtomicBool,
+    ) -> Result<(Vec<Vector>, Vec<Vector>, Vec<C>)> {
+        let base_voltage = self.sweep(&currents, cancel)?;
+        let rhs: Vec<_> = self
+            .earth
+            .nodes
+            .iter()
+            .map(|i| base_voltage[*i][3])
+            .collect();
+        let earth_currents = self.earth.currents(&rhs, cancel)?;
+        for (&node, &current) in self.earth.nodes.iter().zip(&earth_currents) {
+            let mut cursor = node;
+            loop {
+                check_cancel(cancel)?;
+                currents[cursor][3] = currents[cursor][3] + current;
+                match self.parent[cursor] {
+                    Some((parent, _)) => cursor = parent,
+                    None => break,
+                }
+            }
+        }
+        if currents
+            .iter()
+            .flatten()
+            .any(|i| !i.finite() || !i.abs().is_finite())
+        {
+            return Err(CalculationError::Numerical(self.buses[self.order[0]]));
+        }
+        let voltage = self.sweep(&currents, cancel)?;
+        for ((&node, &z), &current) in self
+            .earth
+            .nodes
+            .iter()
+            .zip(&self.earth.impedances)
+            .zip(&earth_currents)
+        {
+            let residual = (voltage[node][3] - z * current).abs();
+            if !residual.is_finite() || residual > 1e-9 * self.nominal[node] {
+                return Err(CalculationError::Numerical(self.buses[node]));
+            }
+        }
+        Ok((voltage, currents, earth_currents))
+    }
     fn sweep(&self, currents: &[Vector], cancel: &AtomicBool) -> Result<Vec<Vector>> {
         let mut voltage = vec![self.source; self.buses.len()];
         for &i in &self.order {
@@ -528,12 +605,12 @@ pub fn solve_cancellable(
     let mut residual = f64::INFINITY;
     for iteration in 1..=options.max_iterations {
         check_cancel(cancel)?;
-        voltage = circuit.sweep(&circuit.currents(&voltage, cancel)?, cancel)?;
-        let currents = circuit.currents(&voltage, cancel)?;
-        let corrected = circuit.sweep(&currents, cancel)?;
+        (voltage, _, _) = circuit.linear_step(circuit.currents(&voltage, cancel)?, cancel)?;
+        let (corrected, currents, earth_currents) =
+            circuit.linear_step(circuit.currents(&voltage, cancel)?, cancel)?;
         residual = voltage
             .iter()
-            .zip(corrected)
+            .zip(&corrected)
             .enumerate()
             .flat_map(|(i, (a, b))| {
                 let base = circuit.nominal[i];
@@ -546,6 +623,8 @@ pub fn solve_cancellable(
         if residual > options.tolerance_pu {
             continue;
         }
+        // Publish the last linear state: Ohm's law and earth boundary conditions hold together.
+        voltage = corrected;
         let mut buses = vec![];
         let mut branches = vec![];
         let mut loss = C::default();
@@ -623,6 +702,43 @@ pub fn solve_cancellable(
                 });
             }
         }
+        let line_loss = loss;
+        let mut grounding_loss = C::default();
+        let mut earth_sum = C::default();
+        let mut groundings = vec![];
+        for ((&node, &z), &current) in circuit
+            .earth
+            .nodes
+            .iter()
+            .zip(&circuit.earth.impedances)
+            .zip(&earth_currents)
+        {
+            check_cancel(cancel)?;
+            let ground_loss = z * current.abs().powi(2);
+            grounding_loss = grounding_loss + ground_loss;
+            earth_sum = earth_sum + current;
+            if !ground_loss.finite() {
+                return Err(CalculationError::Numerical(circuit.buses[node]));
+            }
+            groundings.push(GroundingResult {
+                bus_id: circuit.buses[node],
+                current_to_earth_a: current.into(),
+                voltage_v: voltage[node][3].into(),
+                loss_w: ground_loss.re,
+                loss_var: ground_loss.im,
+            });
+        }
+        if !earth_sum.finite() || !earth_sum.abs().is_finite() {
+            return Err(CalculationError::Numerical(circuit.buses[circuit.order[0]]));
+        }
+        groundings.push(GroundingResult {
+            bus_id: circuit.buses[circuit.order[0]],
+            current_to_earth_a: (earth_sum * -1.0).into(),
+            voltage_v: C::default().into(),
+            loss_w: 0.0,
+            loss_var: 0.0,
+        });
+        loss = loss + grounding_loss;
         let source = power(circuit.source, currents[circuit.order[0]]);
         let net = circuit
             .injections
@@ -633,7 +749,18 @@ pub fn solve_cancellable(
             return Err(CalculationError::Numerical(circuit.buses[circuit.order[0]]));
         }
         check_cancel(cancel)?;
-        return Ok(LoadFlow {iterations:iteration,residual_pu:residual,source_p_w:source.re,source_q_var:source.im,net_demand_p_w:net.re,net_demand_q_var:net.im,total_loss_w:loss.re,total_loss_var:loss.im,balance_error_va:balance,buses,branches,assumptions:vec!["Réseau radial ABCN, matrice primitive complète, source de tension équilibrée idéale avec neutre fixé à la terre.".into(),"Aucune mise à la terre aval, aucun shunt, transformateur ou point étoile flottant. Impédances de source de défaut non utilisées en régime permanent.".into(),"Taux de charge : limite de courant renseignée appliquée uniformément aux quatre conducteurs ; aucun calcul thermique ni harmonique.".into()]});
+        return Ok(LoadFlow {
+            iterations:iteration,residual_pu:residual,source_p_w:source.re,source_q_var:source.im,
+            net_demand_p_w:net.re,net_demand_q_var:net.im,total_loss_w:loss.re,total_loss_var:loss.im,
+            balance_error_va:balance,line_loss_w:line_loss.re,line_loss_var:line_loss.im,
+            grounding_loss_w:grounding_loss.re,grounding_loss_var:grounding_loss.im,groundings,buses,branches,
+            assumptions:vec![
+                "Réseau radial ABCN, matrice primitive complète, source de tension équilibrée idéale avec neutre fixé à la terre.".into(),
+                "Prises de terre du neutre résolues vers une référence de terre équipotentielle commune ; couplages entre électrodes et potentiels locaux du sol non modélisés.".into(),
+                "Aucun shunt de ligne, transformateur ou point étoile flottant. Impédances de source de défaut non utilisées en régime permanent.".into(),
+                "Taux de charge : limite de courant renseignée appliquée uniformément aux quatre conducteurs ; aucun calcul thermique ni harmonique.".into(),
+            ],
+        });
     }
     Err(CalculationError::NonConvergent {
         iterations: options.max_iterations,

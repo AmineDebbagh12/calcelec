@@ -148,12 +148,17 @@ Il présente les tensions et angles par phase, les courants A/B/C/N, le potentie
 du neutre, le déséquilibre U2/U1 et les pertes. Les résultats sont exportables
 avec leur version et leurs hypothèses.
 
-Ce premier jalon accepte les départs radiaux à tension unique, avec neutre mis
-à la terre à la source et sans terre locale aval. Les transformateurs, terres
-aval multiples, shunts, phases manquantes et points étoile flottants sont encore
-refusés. L'exemple rural HTA/BT initial reste donc à calculer avec le moteur
+Ce jalon accepte les départs radiaux à tension unique, avec neutre directement
+à la terre à la source et des prises de terre aval sur une référence commune.
+Le tableau **Prises de terre du neutre** distingue leurs courants, potentiels
+et pertes. Les transformateurs, shunts, phases manquantes et points étoile
+flottants restent refusés. L'exemple rural HTA/BT initial reste donc à calculer avec le moteur
 équilibré simplifié ; il ne doit pas être converti implicitement en réseau ABCN.
-Voir le [domaine et les validations du moteur déséquilibré](docs/calcul-desequilibre.md).
+Un deuxième exemple, `examples/reference-grounded-bt.json`, ajoute des terres
+intermédiaire et terminale. Il conserve les mêmes commandes et le même mode de
+calcul ; les pertes totales incluent désormais lignes et prises de terre.
+Le modèle ne décrit pas les potentiels locaux du sol ni les couplages entre
+électrodes. Voir le [domaine et les validations du moteur déséquilibré](docs/calcul-desequilibre.md).
 
 ## Partager une modification
 
@@ -183,6 +188,7 @@ cargo run -- --apply base.json modification.json resultat.json
 cargo run -- --reference-case four-wire /tmp/quatre-conducteurs.json
 cargo run -- --load-flow examples/reference-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-unbalanced-bt.json
+cargo run -- --unbalanced-load-flow examples/reference-grounded-bt.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -211,8 +217,9 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Étendre le calcul déséquilibré aux transformateurs et aux terres distribuées,
-  puis couvrir les réseaux maillés et les courts-circuits.
+- Étendre le calcul déséquilibré aux transformateurs, au neutre source non
+  directement à la terre et aux modèles de sol plus détaillés, puis couvrir
+  les réseaux maillés et les courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

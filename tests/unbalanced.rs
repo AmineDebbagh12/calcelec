@@ -243,7 +243,7 @@ fn zero_impedance_neutral_is_valid_and_still_carries_return_current() {
     assert!(r.buses.iter().all(|b| b.neutral_displacement_v == 0.0));
 }
 #[test]
-fn unsupported_earthing_shunts_and_floating_star_are_not_silently_ignored() {
+fn unknown_earthing_shunts_and_floating_star_are_not_silently_ignored() {
     for variant in 0..4 {
         let mut n = reference_cases::four_wire();
         match variant {
@@ -256,9 +256,7 @@ fn unsupported_earthing_shunts_and_floating_star_are_not_silently_ignored() {
                 let Some(ElectricalData::Bus(data)) = &mut bus.electrical else {
                     unreachable!()
                 };
-                data.neutral_grounding = Grounding::Impedance {
-                    ohm: Impedance { r: 10.0, x: 0.0 },
-                };
+                data.neutral_grounding = Grounding::Unspecified;
             }
             1 => {
                 let line = n

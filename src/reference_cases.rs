@@ -258,3 +258,56 @@ pub fn unbalanced_bt() -> Network {
     n.objects.insert(pv.id, pv);
     n
 }
+
+/// Synthetic feeder with two distinct downstream neutral earth electrodes.
+pub fn grounded_bt() -> Network {
+    let mut n = unbalanced_bt();
+    n.name = "Référence synthétique — BT avec prises de terre du neutre".into();
+    let end = n
+        .objects
+        .values()
+        .find(|o| o.name == "Client BT")
+        .unwrap()
+        .id;
+    let mut middle = n.objects[&end].clone();
+    middle.id = uuid::Uuid::new_v4();
+    middle.name = "Point de terre intermédiaire".into();
+    middle.geometry = Geometry::Point(Coordinate(50.0, 0.0));
+    let Some(ElectricalData::Bus(data)) = &mut middle.electrical else {
+        unreachable!()
+    };
+    data.neutral_grounding = Grounding::Impedance {
+        ohm: Impedance { r: 0.5, x: 0.0 },
+    };
+    let mid = middle.id;
+    n.objects.insert(mid, middle);
+    let Some(ElectricalData::Bus(data)) = &mut n.objects.get_mut(&end).unwrap().electrical else {
+        unreachable!()
+    };
+    data.neutral_grounding = Grounding::Impedance {
+        ohm: Impedance { r: 1.0, x: 0.0 },
+    };
+    let original_id = n
+        .objects
+        .values()
+        .find(|o| matches!(o.equipment, Equipment::Line { .. }))
+        .unwrap()
+        .id;
+    let mut tail = n.objects[&original_id].clone();
+    tail.id = uuid::Uuid::new_v4();
+    tail.name = "Câble BT — aval".into();
+    if let Equipment::Line { from, length_m, .. } = &mut tail.equipment {
+        *from = mid;
+        *length_m = 50.0;
+    }
+    tail.geometry = Geometry::Polyline(vec![Coordinate(50.0, 0.0), Coordinate(100.0, 0.0)]);
+    let trunk = n.objects.get_mut(&original_id).unwrap();
+    trunk.name = "Câble BT — amont".into();
+    if let Equipment::Line { to, length_m, .. } = &mut trunk.equipment {
+        *to = mid;
+        *length_m = 50.0;
+    }
+    trunk.geometry = Geometry::Polyline(vec![Coordinate(0.0, 0.0), Coordinate(50.0, 0.0)]);
+    n.objects.insert(tail.id, tail);
+    n
+}

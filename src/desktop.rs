@@ -574,7 +574,7 @@ impl Desktop {
             }
         });
         if self.use_unbalanced {
-            ui.small("ABCN : départ radial à tension unique, source idéale à neutre mis à la terre, sans terre aval ni transformateur. Exemple : examples/reference-unbalanced-bt.json.");
+            ui.small("ABCN : départ radial à tension unique, source idéale à neutre directement à la terre, prises de terre aval vers une référence commune, sans transformateur. Exemple : examples/reference-grounded-bt.json.");
         } else if self.simplified_calculation {
             ui.small("Hypothèses : équivalents équilibrés des charges monophasées ; transformateurs purement réactifs, rapport nominal, sans déphasage. Aucun calcul du neutre.");
         }
@@ -595,6 +595,10 @@ impl Desktop {
         ui.small(format!(
             "{} itérations · résidu {:.2e} pu · bilan {:.3e} VA",
             r.iterations, r.residual_pu, r.balance_error_va
+        ));
+        ui.small(format!(
+            "Pertes des lignes : {:.3} W · Pertes des prises de terre : {:.3} W",
+            r.line_loss_w, r.grounding_loss_w
         ));
         ui.collapsing("Hypothèses et traçabilité du calcul ABCN", |ui| {
             ui.label(format!(
@@ -706,6 +710,50 @@ impl Desktop {
                             .unwrap_or_else(|| "—".into()),
                     );
                     ui.label(format!("{:.2}", b.loss_w));
+                    ui.end_row();
+                }
+            });
+        ui.separator();
+        ui.strong("Prises de terre du neutre");
+        ui.small("Courant positif du neutre vers la référence de terre commune ; angles relatifs à la phase A source.");
+        egui::Grid::new("neutral_groundings")
+            .striped(true)
+            .show(ui, |ui| {
+                for title in [
+                    "Jeu de barres",
+                    "I terre (A)",
+                    "Angle (°)",
+                    "|VN| (V)",
+                    "Pertes (W)",
+                ] {
+                    ui.strong(title);
+                }
+                ui.end_row();
+                let mut groundings: Vec<_> = r.groundings.iter().collect();
+                groundings.sort_by_key(|g| &self.network.objects[&g.bus_id].name);
+                for g in groundings {
+                    if ui
+                        .selectable_label(
+                            self.selected == Some(g.bus_id),
+                            &self.network.objects[&g.bus_id].name,
+                        )
+                        .clicked()
+                    {
+                        clicked = Some(g.bus_id);
+                    }
+                    let magnitude = g.current_to_earth_a.magnitude();
+                    let angle = if magnitude < 1e-12 {
+                        0.0
+                    } else {
+                        g.current_to_earth_a
+                            .im
+                            .atan2(g.current_to_earth_a.re)
+                            .to_degrees()
+                    };
+                    ui.label(format!("{magnitude:.3}"));
+                    ui.label(format!("{angle:.2}"));
+                    ui.label(format!("{:.3}", g.voltage_v.magnitude()));
+                    ui.label(format!("{:.3}", g.loss_w));
                     ui.end_row();
                 }
             });
@@ -1629,6 +1677,52 @@ mod tests {
         app.record().unwrap();
         assert!(app.unbalanced_study.is_none());
         deliver(&mut app, report);
+        assert!(app.unbalanced_study.is_none());
+    }
+    #[test]
+    fn grounding_results_render_with_separate_losses_and_are_invalidated_after_edit() {
+        let mut app = Desktop::new();
+        app.network = calcelec::reference_cases::grounded_bt();
+        app.project = Project::new(app.network.clone()).unwrap();
+        app.use_unbalanced = true;
+        app.results_view = true;
+        let report = calcelec::unbalanced::study(
+            &app.project,
+            &calcelec::unbalanced::Options::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(report.result.groundings.len(), 3);
+        assert!(report.result.grounding_loss_w > 0.0);
+        app.unbalanced_study = Some(report);
+        let context = egui::Context::default();
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1280.0, 1024.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        assert!(!output.shapes.is_empty());
+        output.textures_delta.clear();
+        let id = app
+            .network
+            .objects
+            .values()
+            .find(|o| o.name == "Point de terre intermédiaire")
+            .unwrap()
+            .id;
+        app.select(id);
+        let mut data = app.network.objects[&id].electrical.clone().unwrap();
+        let calcelec::electrical::ElectricalData::Bus(bus) = &mut data else {
+            unreachable!()
+        };
+        bus.neutral_grounding = calcelec::electrical::Grounding::Isolated;
+        app.electrical_text = serde_json::to_string(&data).unwrap();
+        app.record().unwrap();
         assert!(app.unbalanced_study.is_none());
     }
 }
