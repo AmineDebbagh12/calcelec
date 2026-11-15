@@ -5,8 +5,9 @@ HTA/BT, avec la France et Enedis comme référence métier.
 
 **État : prototype avec toolbox géographique, modélisation, partage et répartition de puissance AC
 équilibrée sur réseaux radiaux, plus un moteur déséquilibré ABC/ABCN couvrant
-les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT. Les courts-circuits
-restent à implémenter.**
+les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT.
+Un premier moteur radial de court-circuit publie IccBmin, 3I0 et les marges de
+protection ; son périmètre IEC 60909 reste à étendre.**
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -233,11 +234,18 @@ cargo run -- --unbalanced-load-flow examples/reference-source-grounded-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-rural-unbalanced.json
 cargo run -- --topology examples/reference-rural-meshed.json
 cargo run -- --unbalanced-load-flow examples/reference-rural-meshed.json
+cargo run -- --scenario-unbalanced-load-flow examples/reference-rural-unbalanced.json examples/scenario-maximum-consumption.json
+cargo run -- --short-circuit examples/reference-rural-unbalanced.json examples/fault-study-rural.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
 avec ses propres identifiants ; pour partager une même base, transmettre son
 export plutôt que générer un autre exemple.
+
+Les [scénarios de charge et production](docs/scenarios-etude.md) appliquent des
+coefficients globaux et des exceptions compactes sans modifier le réseau de base.
+Le [premier moteur de court-circuit](docs/calcul-court-circuit.md) détaille les
+formules, les contrôles IccBmin/3I0 et les limites actuelles.
 
 ## Vérification
 
@@ -267,7 +275,8 @@ projection du neutre métallique vers le modèle de retour de terre pandapower.
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
 - Étendre la comparaison indépendante aux modèles de neutre/terre, Yzn et aux
-  topologies maillées, puis développer les modèles de sol détaillés et les courts-circuits.
+  topologies maillées ; compléter le moteur de défaut par les shunts homopolaires,
+  cas min/max IEC 60909, contributions et défauts triphasés.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

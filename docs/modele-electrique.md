@@ -115,10 +115,11 @@ détaillés. Cette donnée seule ne permet pas de calculer tous les défauts.
 Une source peut déclarer ses impédances internes directe, inverse et homopolaire
 en ohms, à la tension nominale de son bus, ainsi que son régime de neutre.
 Ces impédances excluent la mise à la terre du neutre déclarée séparément, pour
-éviter son double comptage dans les futurs calculs de défaut. Une impédance de
+éviter son double comptage dans les calculs de défaut. Une impédance de
 séquence inconnue est `null` ; une impédance interne explicitement nulle est refusée.
 Le moteur de régime permanent utilise encore la tension idéale imposée au bus
-source ; ces impédances sont des entrées pour le futur moteur de défaut.
+source ; le moteur radial de défaut les exploite désormais pour IccBmin et 3I0,
+tandis que les moteurs de régime permanent continuent à imposer la tension idéale.
 
 Les injections déclarent leur connexion : phase-neutre, entre deux phases,
 étoile triphasée avec ou sans N, ou triangle triphasé. La connexion doit être
@@ -129,7 +130,8 @@ bornes de phase ; elle reste une injection monophasée au sens du calcul.
 La contribution au défaut est déclarée inconnue, explicitement nulle, ou limitée
 par une valeur de courant. Cette dernière est une donnée initiale pour les
 convertisseurs, sans encore décrire leur loi dynamique ou dépendance à la tension.
-Aucun calcul de contribution au défaut n'est réalisé dans ce jalon.
+Le premier moteur de défaut néglige encore ces contributions et l'indique dans
+ses hypothèses. Le champ prépare leur ajout aux cas maximum et minimum ultérieurs.
 
 ## Diagnostic et moteur équilibré
 
@@ -183,7 +185,8 @@ Le moteur déséquilibré exploite les matrices ABCN et les modèles Dyn/Yzn HTA
 sur des départs radiaux, avec neutre BT explicitement représenté ; voir le
 [jalon déséquilibré](calcul-desequilibre.md). Un cas rural complet est désormais
 calculé ; son extension aux modèles de sol détaillés, la comparaison à des outils indépendants et la validation
-normative des calculs de courts-circuits restent à réaliser.
+normative complète des calculs de courts-circuits reste à réaliser. Les premières
+formules et limites sont décrites dans [le moteur IccBmin/3I0](calcul-court-circuit.md).
 
 Références de formulation consultées : [matrices de ligne OpenDSS / EPRI](https://opendss.epri.com/Properties14.html),
 [modèle généralisé de transformateur OpenDSS / EPRI](https://opendss.epri.com/GeneralizedTransformermodel.html),

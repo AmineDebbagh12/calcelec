@@ -1,0 +1,18 @@
+{
+  "voltage_factor_min": 0.95,
+  "fault_impedance_ohm": {
+    "r": 0.0,
+    "x": 0.0
+  },
+  "protection_requirements": [
+    {
+      "name": "Départ rural — seuils de démonstration",
+      "bus_id": "55aea337-69ac-4c7e-b6bd-a19e674183d8",
+      "minimum_icc_b_a": 2000.0,
+      "residual": {
+        "criterion": "maximum_admissible",
+        "threshold_a": 2500.0
+      }
+    }
+  ]
+}

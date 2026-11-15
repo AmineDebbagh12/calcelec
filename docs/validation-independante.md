@@ -27,8 +27,8 @@ sortie standard ; `--output rapport.json` permet de l'enregistrer.
 ## Correspondance des modèles
 
 - La source est rendue pratiquement idéale dans pandapower, car CalcElec impose
-  encore sa tension en régime permanent et réserve ses impédances internes aux
-  futurs calculs de défaut.
+  encore sa tension en régime permanent ; ses impédances internes sont désormais
+  utilisées par le moteur radial IccBmin/3I0.
 - Les matrices ABC symétriques sont converties en impédances directe et
   homopolaire. Les shunts sont nuls dans ce cas.
 - Les Dyn11 reprennent tension assignée, uk, pertes cuivre, angle et impédance

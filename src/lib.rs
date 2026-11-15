@@ -6,6 +6,8 @@ pub mod load_flow;
 pub mod model;
 pub mod project;
 pub mod reference_cases;
+pub mod scenario;
+pub mod short_circuit;
 pub mod storage;
 pub mod topology;
 pub mod unbalanced;

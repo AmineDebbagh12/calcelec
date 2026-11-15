@@ -1,0 +1,7 @@
+{
+  "id": "10000000-0000-4000-8000-000000000001",
+  "name": "Consommation maximale — démonstration",
+  "kind": "maximum_consumption",
+  "load_scale": 1.2,
+  "generation_scale": 0.0
+}

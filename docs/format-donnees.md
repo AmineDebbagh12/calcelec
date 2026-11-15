@@ -200,6 +200,20 @@ de réseau reste inchangé en version 4 ; les anciennes déclarations de terres,
 auparavant refusées au calcul, sont maintenant exploitées dans le domaine pris
 en charge.
 
+Les scénarios de charge et production sont des documents d'étude séparés du
+schéma 4. Leur identifiant, leur type, deux coefficients globaux et leurs rares
+exceptions P/Q/état forment un format compact. L'application produit une copie
+de calcul sans ajouter de lot à l'historique du réseau. Le résultat contient le
+scénario complet, `project_id` et `network_version`, ce qui interdit d'attribuer
+silencieusement un résultat à une autre version. Voir
+[le contrat des scénarios](scenarios-etude.md).
+
+Le résultat `radial-sequence-fault-0.1` reste lui aussi séparé du projet. Il
+enregistre options, version du moteur, impédances de séquence, IccBmin, 3I0
+optionnel et contrôles de seuil. Un contrôle résiduel distingue explicitement
+`minimum_detection` de `maximum_admissible` ; une valeur non calculable est
+`null`, jamais zéro. Voir [le contrat du calcul de défaut](calcul-court-circuit.md).
+
 - Pas encore d'empreinte cryptographique, de signature ou d'authentification :
   les UUID identifient les versions mais ne certifient pas leur contenu.
 - Les migrations futures devront être explicites, comme les migrations 1/2/3 → 4.
@@ -207,7 +221,8 @@ en charge.
   branches persistant, de fusion, d'export d'une plage de lots ni de points de reprise.
 - Pas de serveur partagé ; le contrat de données est indépendant de SQLite,
   mais un adaptateur distant et son protocole restent à implémenter.
-- Pas encore de disposition graphique persistée, de cas d'étude, de catalogue
-  ni de résultats de simulation dans ce schéma initial.
+- Pas encore de disposition graphique persistée, de collection de scénarios,
+  de catalogue ni de résultats de simulation dans ce schéma initial. Les fichiers
+  de scénario séparés constituent la première étape sans migration du réseau.
 - Avant de figer le format V1, compléter le modèle électrique et mesurer les
   tailles, les coûts de reconstruction et les besoins de compression.

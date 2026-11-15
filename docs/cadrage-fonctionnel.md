@@ -152,11 +152,14 @@ provisoires de la toolbox ne constituent pas ce catalogue.
 
 ### Courts-circuits
 
-- Référentiel de calcul proposé : IEC 60909, avec édition et domaine
-  d'application à préciser avant l'implémentation de cette fonction.
+- Référentiel cible : IEC 60909-0:2026. Le moteur 0.1 n'en implémente qu'un
+  sous-ensemble radial explicite et ne revendique pas encore la conformité complète.
 - Défauts triphasés, biphasés, monophasés à la terre et biphasés à la terre,
   sur les jeux de barres ; impédance de défaut paramétrable.
 - Cas maximal et minimal avec hypothèses enregistrées.
+- Grandeurs d'exploitation prioritaires Enedis : courant biphasé minimal IccBmin
+  et courant résiduel 3I0 des défauts monophasés-terre. Les contrôles distinguent
+  un seuil minimal de détection d'un plafond maximal admissible.
 - Résultats ciblés : courant initial symétrique I''k, courant de crête ip,
   contributions des sources et courants dans les branches.
 - Autres grandeurs, notamment courants de coupure et équivalent thermique :
@@ -216,8 +219,9 @@ la conformité : celle-ci demande un périmètre défini et une validation dédi
 - Annuler/rétablir les modifications de modèle.
 - Enregistrement local dans un format documenté et versionné ; ouverture et
   sauvegarde sans perte des paramètres et de la disposition graphique.
-- Plusieurs cas d'étude partageant un réseau de référence, avec variations
-  de charge, production, prises et états de coupure.
+- Plusieurs cas d'étude partageant un réseau de référence, notamment production
+  maximale et consommation maximale. Le format compact P/Q et ses exceptions
+  par injection sont disponibles ; prises et états de coupure restent à intégrer.
 - Tableaux de résultats filtrables et affichage des valeurs sur le schéma.
 - Export CSV et rapport synthétique exportable, avec modèle, cas d'étude,
   options, hypothèses et version du moteur.
@@ -398,8 +402,9 @@ Il est validé par des solutions analytiques monophasées et par comparaison au
 moteur équilibré sur un cas symétrique. Les terres BT sont désormais découpées
 en zones galvaniques ancrées à la source ou au secondaire Dyn/Yzn. L'ancrage
 source accepte désormais une impédance complexe non nulle. Les modèles de sol
-détaillés, les mailles traversant des transformateurs et les
-courts-circuits restent à développer.
+détaillés et les mailles traversant des transformateurs restent à développer.
+Un premier moteur de défaut radial exploite maintenant les réseaux de séquence
+pour publier IccBmin et 3I0 ; il ne couvre pas encore tout le domaine IEC 60909.
 Voir le [premier jalon ABCN](calcul-desequilibre.md) pour ses limites précises.
 Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventions
 et les données encore à compléter.
@@ -419,8 +424,8 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | A bis — Contrat de données | Objets, instantanés, versions et lots documentés | Socle opérationnel ; compacité et montée en charge encore à mesurer |
 | B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; le diagnostic de topologie est partagé, mais le calcul équilibré maillé reste à couvrir |
 | C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial et faiblement maillé, terres multi-zones, neutre source impédant, groupes Dyn/Yzn et cas rural détaillé disponibles ; comparaison pandapower disponible sur le sous-domaine commun, neutre/terre externe et mailles générales à compléter |
-| D — Courts-circuits | Méthode et modèles du périmètre retenu | Défauts supportés validés, cas min/max et contributions vérifiés |
-| E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
+| D — Courts-circuits | Méthode et modèles du périmètre retenu | Première version radiale IccBmin/3I0 et marges de protection disponible ; shunts homopolaires, cas IEC complets, contributions et mailles à ajouter |
+| E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Format compact de scénarios P/Q disponible en CLI ; édition, collection persistante et comparaison dans l'interface à ajouter |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
 | E ter — Vues réseau et mondes internes | Carte externe, unifilaire global dérivé et unifilaires locaux des postes | Navigation sans ambiguïté, rattachements et bornes persistés, aucune divergence silencieuse entre géographie externe et contenu interne |
 | F — Ergonomie, langues et livraison | Édition géographique affinée, français/anglais et distributions | Parcours métier testés avec des utilisateurs cibles dans les deux langues ; corrections d'ergonomie et essais natifs Windows/Linux |
@@ -433,14 +438,15 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 2. **Achever B/C — topologies d'exploitation** : étendre le calcul faiblement
    maillé aux topologies générales et au moteur équilibré ; le diagnostic des
    îlots, points de coupure et mailles effectivement fermées est désormais disponible.
-3. **Réaliser D — courts-circuits** : figer l'édition et le sous-ensemble IEC
-   60909, développer défauts triphasés, biphasés et à la terre, cas min/max,
-   contributions et cas analytiques HTA/BT.
+3. **Étendre D — courts-circuits** : confronter le sous-ensemble actuel à
+   l'IEC 60909-0:2026, puis ajouter défauts triphasés, shunts et courants
+   capacitifs homopolaires, cas min/max, contributions et mailles.
 4. **Réaliser E bis — catalogue technologique** : types versionnés de câbles,
    lignes et transformateurs, instanciation explicite, variantes locales et
    mise à jour contrôlée sans modifier les études historiques.
-5. **Compléter E — études et restitutions** : cas de charge/production, comparaison
-   avant-après, états de coupure, persistance des résultats, exports CSV et rapport.
+5. **Compléter E — études et restitutions** : intégrer les scénarios compacts de
+   charge/production à l'interface, puis comparaison avant-après, états de coupure,
+   persistance des résultats, exports CSV et rapport.
 6. **Réaliser E ter — mondes internes** : ajouter le modèle de conteneur et ses
    bornes, puis la navigation carte → poste → unifilaire interne et le retour
    synchronisé vers la carte, selon l'inspiration fonctionnelle d'Erable.
