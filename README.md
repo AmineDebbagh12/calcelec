@@ -257,13 +257,17 @@ Les tests numériques comparent les tensions, angles, courants et pertes à des
 solutions analytiques, puis vérifient les bilans des réseaux ruraux radial et
 bouclé, les changements d'état des interrupteurs, les erreurs
 attendues, l'annulation et l'invalidation des résultats après modification.
+Le cas rural radial est également rejoué avec pandapower 3.3.0 par le
+[harnais de validation indépendante](docs/validation-independante.md). Cette
+comparaison optionnelle distingue les grandeurs directement comparables de la
+projection du neutre métallique vers le modèle de retour de terre pandapower.
 
 ## Suite du développement
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Comparer le cas rural HTA/BT détaillé à un moteur indépendant, puis généraliser
-  les topologies maillées, les modèles de sol détaillés et les courts-circuits.
+- Étendre la comparaison indépendante aux modèles de neutre/terre, Yzn et aux
+  topologies maillées, puis développer les modèles de sol détaillés et les courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

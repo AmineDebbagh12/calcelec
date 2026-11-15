@@ -100,8 +100,9 @@ aucun résultat partiel.
 Le principe de sommation est décrit par [MATPOWER](https://matpower.org/documentation/ref-manual/legacy/functions/calc_v_i_sum.html).
 La distinction entre neutre explicite et terre est également présentée dans
 les [conventions OpenDSS / EPRI](https://opendss.epri.com/NeutralRules.html).
-L'implémentation et les validations de CalcElec sont propres au projet ; aucune
-comparaison numérique avec ces outils n'a encore été effectuée.
+L'implémentation reste propre au projet. Le cas rural est désormais comparé à
+pandapower sur leur sous-domaine commun ; les hypothèses, écarts et tolérances
+sont consignés dans la [validation indépendante](validation-independante.md).
 
 ## Transformateurs Dyn et Yzn — extensions 0.3, 0.4 et 0.6
 
@@ -391,7 +392,15 @@ Le test associé vérifie les huit bus, les sept branches, les trois frontières
 galvaniques, l'absence de courant homopolaire sur les lignes HTA, la fermeture
 locale des courants de terre et la somme détaillée des pertes. Ce cas prépare
 la comparaison avec un moteur indépendant ; il ne constitue pas encore cette
-validation externe.
+validation externe complète du neutre métallique.
+
+Une comparaison indépendante avec pandapower 3.3.0 vérifie les bus HTA, les
+Dyn11, les puissances et les pertes. L'écart maximal HTA est inférieur à
+2×10⁻⁷ pu et celui des pertes transformateurs à 0,4 W. La projection du câble
+ABCN, nécessaire car les deux moteurs ne représentent pas le retour neutre/terre
+de la même manière, atteint 0,0063 pu à son extrémité. Le script versionné échoue
+si les tolérances documentées sont dépassées ; voir
+[la méthode et les résultats](validation-independante.md).
 
 La variante `examples/reference-rural-meshed.json` ajoute une liaison HTA de
 bouclage entre la source et le troisième poste. `--topology` détecte une branche
