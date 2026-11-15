@@ -4,8 +4,9 @@ Application de bureau Rust pour l'étude des réseaux de distribution publique
 HTA/BT, avec la France et Enedis comme référence métier.
 
 **État : prototype avec toolbox géographique, modélisation, partage et répartition de puissance AC
-équilibrée sur réseaux radiaux, plus un premier moteur BT déséquilibré ABCN.
-Les transformateurs en déséquilibré et les courts-circuits restent à implémenter.**
+équilibrée sur réseaux radiaux, plus un moteur déséquilibré ABC/ABCN couvrant
+les départs BT et un premier transformateur Dyn HTA/BT. Les courts-circuits
+restent à implémenter.**
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -105,12 +106,13 @@ version. Les structures préremplies sont provisoires et doivent être vérifié
 Les données inconnues des anciens projets restent absentes ; l'application les
 signale dans **Données détaillées** et la commande `--check`.
 
-Deux cas synthétiques ouvrables depuis le panneau Projet sont fournis :
+Trois cas synthétiques sont notamment fournis :
 [ligne quatre conducteurs](examples/reference-four-wire.json) et
-[transformateur avec pertes cuivre](examples/reference-transformer.json).
+[transformateur équilibré avec pertes cuivre](examples/reference-transformer.json),
+ainsi qu'un [transformateur Dyn11 déséquilibré](examples/reference-dyn-transformer.json).
 Ils se calculent sans les options de simplification. Le moteur exploite leurs
-matrices équilibrées et leurs résistances ; les déphasages, prises hors nominal
-et matrices dissymétriques restent refusés explicitement.
+matrices et résistances ; le moteur déséquilibré applique aussi le rapport, la
+prise fixe, le déphasage horaire et l'impédance homopolaire du cas Dyn pris en charge.
 La [description du modèle électrique](docs/modele-electrique.md) précise les
 unités, conventions, limites et contrôles analytiques.
 
@@ -142,7 +144,7 @@ non alimentés sont refusés. Une non-convergence ne produit aucun tableau de r�
 La [spécification numérique du premier moteur](docs/calcul-regime-permanent.md)
 décrit ses conventions et sa validation.
 
-## Calcul déséquilibré BT avec neutre
+## Calcul déséquilibré HTA/BT avec neutre
 
 Ouvrir `examples/reference-unbalanced-bt.json` dans le panneau Projet, puis
 choisir **Déséquilibré ABCN** et lancer le calcul. Ce moteur utilise les matrices
@@ -151,17 +153,22 @@ Il présente les tensions et angles par phase, les courants A/B/C/N, le potentie
 du neutre, le déséquilibre U2/U1 et les pertes. Les résultats sont exportables
 avec leur version et leurs hypothèses.
 
-Ce jalon accepte les départs radiaux à tension unique, avec neutre directement
+Ce jalon accepte les départs radiaux BT à tension unique, avec neutre directement
 à la terre à la source et des prises de terre aval sur une référence commune.
 Le tableau **Prises de terre du neutre** distingue leurs courants, potentiels
-et pertes. Les transformateurs, shunts, phases manquantes et points étoile
-flottants restent refusés. L'exemple rural HTA/BT initial reste donc à calculer avec le moteur
-équilibré simplifié ; il ne doit pas être converti implicitement en réseau ABCN.
+et pertes. Il accepte également un franchissement HTA/BT Dyn : bus HTA ABC,
+secondaire étoile ABCN directement mis à la terre, excitation nulle et impédance
+homopolaire déclarée. Les autres couplages, les prises de terre supplémentaires
+derrière ce transformateur, les shunts, phases manquantes et points étoile
+flottants restent refusés. L'exemple rural complet reste donc à calculer avec
+le moteur équilibré simplifié ; il ne doit pas être converti implicitement.
 Un deuxième exemple, `examples/reference-grounded-bt.json`, ajoute des terres
 intermédiaire et terminale. Il conserve les mêmes commandes et le même mode de
 calcul ; les pertes totales incluent désormais lignes et prises de terre.
 Le modèle ne décrit pas les potentiels locaux du sol ni les couplages entre
 électrodes. Voir le [domaine et les validations du moteur déséquilibré](docs/calcul-desequilibre.md).
+Le cas `examples/reference-dyn-transformer.json` vérifie un Dyn11 20 kV/400 V
+alimentant trois charges monophasées différentes.
 
 ## Partager une modification
 
@@ -192,6 +199,7 @@ cargo run -- --reference-case four-wire /tmp/quatre-conducteurs.json
 cargo run -- --load-flow examples/reference-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-unbalanced-bt.json
 cargo run -- --unbalanced-load-flow examples/reference-grounded-bt.json
+cargo run -- --unbalanced-load-flow examples/reference-dyn-transformer.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -220,9 +228,9 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Étendre le calcul déséquilibré aux transformateurs, au neutre source non
-  directement à la terre et aux modèles de sol plus détaillés, puis couvrir
-  les réseaux maillés et les courts-circuits.
+- Étendre le calcul déséquilibré aux autres couplages de transformateurs, aux
+  terres BT multi-zones, au neutre source non directement à la terre et aux
+  modèles de sol plus détaillés, puis couvrir les réseaux maillés et les courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

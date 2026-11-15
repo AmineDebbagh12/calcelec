@@ -41,7 +41,13 @@ impl GroundSystem {
                     .iter()
                     .zip(&paths[j])
                     .take_while(|(a, b)| a == b)
-                    .fold(C::default(), |sum, (e, _)| sum + edges[*e].z[3][3]);
+                    .try_fold(C::default(), |sum, (e, _)| {
+                        edges[*e].neutral_impedance().map(|z| sum + z).ok_or_else(|| {
+                            unsupported(
+                                "une prise de terre aval ne peut pas traverser une frontière de transformateur dans ce jalon",
+                            )
+                        })
+                    })?;
                 *value = common + if i == j { earth[i].1 } else { C::default() };
             }
         }

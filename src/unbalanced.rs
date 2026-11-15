@@ -1,20 +1,23 @@
 //! Four-conductor radial AC load flow in physical units, with an explicit neutral.
 use crate::{
     complex::C,
-    electrical::{Conductor, ElectricalData, Grounding, InjectionConnection},
+    electrical::{
+        Conductor, ElectricalData, Grounding, InjectionConnection, TransformerData,
+        WindingConnection,
+    },
     load_flow::{CalculationError, Result},
     model::{Equipment, Id, Network},
     project::Project,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::atomic::{AtomicBool, Ordering},
 };
 mod grounding;
 use grounding::GroundSystem;
 const CONDUCTORS: [Conductor; 4] = [Conductor::A, Conductor::B, Conductor::C, Conductor::N];
-pub const SOLVER_VERSION: &str = "radial-four-wire-0.2";
+pub const SOLVER_VERSION: &str = "radial-four-wire-0.3";
 type Vector = [C; 4];
 type Matrix = [[C; 4]; 4];
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,9 +80,10 @@ pub struct VoltageResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BusResult {
     pub id: Id,
+    pub conductors: Vec<Conductor>,
     /// Conductor-to-ground phasors, always ordered A B C N.
     pub conductor_voltages_v: [Phasor; 4],
-    /// A-N, B-N, C-N, relative to the source phase A reference.
+    /// A-N, B-N, C-N; for an ABC bus, phase-to-earth with no N conductor.
     pub phase_neutral: [VoltageResult; 3],
     /// A-B, B-C, C-A magnitudes.
     pub phase_phase_v: [f64; 3],
@@ -93,6 +97,10 @@ pub struct BranchResult {
     pub to_bus: Id,
     /// Oriented from the source downstream; order A B C N.
     pub currents_a: [Phasor; 4],
+    /// Current entering the branch on its upstream side; order A B C N.
+    pub currents_from_a: [Phasor; 4],
+    /// Current leaving the branch on its downstream side; order A B C N.
+    pub currents_to_a: [Phasor; 4],
     pub p_from_w: f64,
     pub q_from_var: f64,
     pub p_to_w: f64,
@@ -123,6 +131,8 @@ pub struct LoadFlow {
     pub balance_error_va: f64,
     pub line_loss_w: f64,
     pub line_loss_var: f64,
+    pub transformer_loss_w: f64,
+    pub transformer_loss_var: f64,
     pub grounding_loss_w: f64,
     pub grounding_loss_var: f64,
     pub groundings: Vec<GroundingResult>,
@@ -151,6 +161,12 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 fn full_conductors(values: &[Conductor]) -> bool {
     values.len() == 4 && CONDUCTORS.iter().all(|c| values.contains(c))
 }
+fn phase_conductors(values: &[Conductor]) -> bool {
+    values.len() == 3 && CONDUCTORS[..3].iter().all(|c| values.contains(c))
+}
+fn same_conductors(a: &[Conductor], b: &[Conductor]) -> bool {
+    a.len() == b.len() && a.iter().all(|c| b.contains(c))
+}
 fn grounded(g: &Grounding) -> bool {
     matches!(g,Grounding::Impedance {ohm} if ohm.r==0.0 && ohm.x==0.0)
 }
@@ -162,12 +178,147 @@ fn phase_index(phase: Conductor) -> usize {
         Conductor::N => 3,
     }
 }
+#[derive(Clone, Copy)]
+enum EdgeModel {
+    Line(Matrix),
+    Dyn {
+        ratio: f64,
+        shift: C,
+        z_positive_to_ohm: C,
+        z_zero_to_ohm: C,
+    },
+}
 struct Edge {
     id: Id,
     a: usize,
     b: usize,
-    z: Matrix,
-    limit: Option<f64>,
+    model: EdgeModel,
+    current_limits: Option<(f64, f64)>,
+}
+impl Edge {
+    fn upstream_current(&self, downstream: Vector) -> Vector {
+        match self.model {
+            EdgeModel::Line(_) => downstream,
+            EdgeModel::Dyn { ratio, shift, .. } => {
+                let sequence = phase_to_sequence(downstream);
+                let upstream_sequence = [
+                    C::default(),
+                    sequence[1] * shift.conj() * (1.0 / ratio),
+                    sequence[2] * shift * (1.0 / ratio),
+                ];
+                let mut result = sequence_to_phase(upstream_sequence);
+                result[3] = C::default();
+                result
+            }
+        }
+    }
+    fn downstream_voltage(&self, upstream: Vector, downstream_current: Vector) -> Vector {
+        match self.model {
+            EdgeModel::Line(z) => std::array::from_fn(|k| {
+                upstream[k]
+                    - (0..4).fold(C::default(), |sum, j| sum + z[k][j] * downstream_current[j])
+            }),
+            EdgeModel::Dyn {
+                ratio,
+                shift,
+                z_positive_to_ohm,
+                z_zero_to_ohm,
+            } => {
+                let voltage_sequence = phase_to_sequence(upstream);
+                let current_sequence = phase_to_sequence(downstream_current);
+                let downstream_sequence = [
+                    C::default() - z_zero_to_ohm * current_sequence[0],
+                    voltage_sequence[1] * shift * (1.0 / ratio)
+                        - z_positive_to_ohm * current_sequence[1],
+                    voltage_sequence[2] * shift.conj() * (1.0 / ratio)
+                        - z_positive_to_ohm * current_sequence[2],
+                ];
+                let mut result = sequence_to_phase(downstream_sequence);
+                result[3] = C::default();
+                result
+            }
+        }
+    }
+    fn neutral_impedance(&self) -> Option<C> {
+        match self.model {
+            EdgeModel::Line(z) => Some(z[3][3]),
+            EdgeModel::Dyn { .. } => None,
+        }
+    }
+    fn transformer(&self) -> bool {
+        matches!(self.model, EdgeModel::Dyn { .. })
+    }
+    fn loading(&self, upstream: Vector, downstream: Vector) -> Option<f64> {
+        self.current_limits.map(|(from, to)| {
+            let count = if self.transformer() { 3 } else { 4 };
+            let upstream_max = upstream[..count]
+                .iter()
+                .map(|i| i.abs())
+                .fold(0.0, f64::max)
+                / from;
+            let downstream_max = downstream[..count]
+                .iter()
+                .map(|i| i.abs())
+                .fold(0.0, f64::max)
+                / to;
+            upstream_max.max(downstream_max) * 100.0
+        })
+    }
+}
+fn phase_to_sequence(value: Vector) -> [C; 3] {
+    let a = C::new(-0.5, 3.0_f64.sqrt() / 2.0);
+    let a2 = a * a;
+    [
+        (value[0] + value[1] + value[2]) * (1.0 / 3.0),
+        (value[0] + a * value[1] + a2 * value[2]) * (1.0 / 3.0),
+        (value[0] + a2 * value[1] + a * value[2]) * (1.0 / 3.0),
+    ]
+}
+fn sequence_to_phase(value: [C; 3]) -> Vector {
+    let a = C::new(-0.5, 3.0_f64.sqrt() / 2.0);
+    let a2 = a * a;
+    [
+        value[0] + value[1] + value[2],
+        value[0] + a2 * value[1] + a * value[2],
+        value[0] + a * value[1] + a2 * value[2],
+        C::default(),
+    ]
+}
+fn dyn_model(
+    name: &str,
+    data: &TransformerData,
+    rated_va: f64,
+    uk_percent: f64,
+) -> Result<EdgeModel> {
+    if data.from.connection != WindingConnection::Delta
+        || data.to.connection != WindingConnection::Star
+        || !data.to.neutral_terminal
+        || !grounded(&data.to.grounding)
+    {
+        return Err(unsupported(format!(
+            "{name} : ce jalon couvre uniquement un transformateur Dyn avec neutre BT exposé et directement mis à la terre"
+        )));
+    }
+    if data.iron_loss_w != Some(0.0) || data.no_load_current_percent != Some(0.0) {
+        return Err(unsupported(format!(
+            "{name} : pertes fer et courant à vide doivent être explicitement nuls dans ce jalon"
+        )));
+    }
+    let Some(zero) = data.zero_sequence_ohm_referred_from else {
+        return Err(unsupported(format!(
+            "{name} : impédance homopolaire ramenée au côté HTA requise"
+        )));
+    };
+    let ratio = data.ratio();
+    let series = data.series_pu(rated_va, uk_percent)?;
+    let base_to = data.to.rated_voltage_ll_v.powi(2) / rated_va;
+    let angle = data.phase_shift_deg().to_radians();
+    Ok(EdgeModel::Dyn {
+        ratio,
+        shift: C::new(angle.cos(), angle.sin()),
+        z_positive_to_ohm: C::new(series.r * base_to, series.x * base_to),
+        z_zero_to_ohm: C::new(zero.r, zero.x) * (1.0 / ratio.powi(2)),
+    })
 }
 struct Injection {
     bus: usize,
@@ -176,6 +327,7 @@ struct Injection {
 }
 struct Circuit {
     buses: Vec<Id>,
+    conductors: Vec<Vec<Conductor>>,
     nominal: Vec<f64>,
     edges: Vec<Edge>,
     injections: Vec<Injection>,
@@ -227,13 +379,8 @@ impl Circuit {
                 source_object.name
             )));
         };
-        if !grounded(&data.neutral_grounding) {
-            return Err(unsupported(
-                "ce jalon ABCN exige une source idéale avec neutre directement à la terre",
-            ));
-        }
-        let mut earth = vec![];
-        for (i, id) in buses.iter().enumerate() {
+        let mut bus_data = Vec::with_capacity(buses.len());
+        for id in &buses {
             let o = &network.objects[id];
             let Some(ElectricalData::Bus(data)) = &o.electrical else {
                 return Err(unsupported(format!(
@@ -241,36 +388,27 @@ impl Circuit {
                     o.name
                 )));
             };
-            if !full_conductors(&data.conductors) {
+            if !full_conductors(&data.conductors) && !phase_conductors(&data.conductors) {
                 return Err(unsupported(format!(
-                    "{} : ce moteur exige A/B/C/N sur chaque bus",
+                    "{} : ce moteur exige A/B/C ou A/B/C/N sur chaque bus",
                     o.name
                 )));
             }
-            if i == root {
-                if !grounded(&data.neutral_grounding) {
-                    return Err(unsupported(format!(
-                        "{} : le neutre source doit rester directement à la terre",
-                        o.name
-                    )));
-                }
-            } else {
-                match &data.neutral_grounding {
-                    Grounding::Isolated => {}
-                    Grounding::Impedance { ohm } => earth.push((i, C::new(ohm.r, ohm.x))),
-                    _ => {
-                        return Err(unsupported(format!(
-                            "{} : préciser l'impédance de terre du neutre ou déclarer l'absence de prise de terre locale",
-                            o.name
-                        )));
-                    }
-                }
-            }
-            if (nominal[i] / nominal[root] - 1.0).abs() > 1e-10 {
-                return Err(unsupported(
-                    "le premier moteur ABCN couvre un seul niveau de tension, en aval d'un poste",
-                ));
-            }
+            bus_data.push(data);
+        }
+        if full_conductors(&bus_data[root].conductors)
+            && (!grounded(&bus_data[root].neutral_grounding) || !grounded(&data.neutral_grounding))
+        {
+            return Err(unsupported(
+                "une source raccordée en ABCN exige un neutre directement à la terre dans les données du bus et de la source",
+            ));
+        } else if phase_conductors(&bus_data[root].conductors)
+            && !matches!(data.neutral_grounding, Grounding::NotApplicable)
+            && !grounded(&data.neutral_grounding)
+        {
+            return Err(unsupported(
+                "une source raccordée en ABC doit déclarer son neutre non applicable ou directement mis à la terre hors du modèle de régime permanent",
+            ));
         }
         let mut edges = vec![];
         let mut injections = vec![];
@@ -293,9 +431,17 @@ impl Circuit {
                             o.name
                         )));
                     };
-                    if !full_conductors(&data.conductors) {
+                    if !full_conductors(&data.conductors) && !phase_conductors(&data.conductors) {
                         return Err(unsupported(format!(
-                            "{} : quatre conducteurs A/B/C/N requis",
+                            "{} : conducteurs A/B/C ou A/B/C/N requis",
+                            o.name
+                        )));
+                    }
+                    if !same_conductors(&data.conductors, &bus_data[a].conductors)
+                        || !same_conductors(&data.conductors, &bus_data[b].conductors)
+                    {
+                        return Err(unsupported(format!(
+                            "{} : les conducteurs du tronçon doivent correspondre exactement à ceux de ses deux bus",
                             o.name
                         )));
                     }
@@ -310,12 +456,11 @@ impl Circuit {
                         )));
                     }
                     let mut z = [[C::default(); 4]; 4];
-                    for (row, c) in CONDUCTORS.iter().enumerate() {
-                        for (col, d) in CONDUCTORS.iter().enumerate() {
-                            let i = data.conductors.iter().position(|v| v == c).unwrap();
-                            let j = data.conductors.iter().position(|v| v == d).unwrap();
+                    for (i, c) in data.conductors.iter().enumerate() {
+                        for (j, d) in data.conductors.iter().enumerate() {
                             let value = data.series_ohm_per_km[i][j];
-                            z[row][col] = C::new(value.r, value.x) * (length_m / 1000.0);
+                            z[phase_index(*c)][phase_index(*d)] =
+                                C::new(value.r, value.x) * (length_m / 1000.0);
                         }
                     }
                     if z.iter().flatten().any(|v| !v.finite()) {
@@ -325,8 +470,8 @@ impl Circuit {
                         id: o.id,
                         a,
                         b,
-                        z,
-                        limit: Some(max_current_a),
+                        model: EdgeModel::Line(z),
+                        current_limits: Some((max_current_a, max_current_a)),
                     });
                 }
                 Equipment::Switch {
@@ -337,10 +482,18 @@ impl Circuit {
                     let (Some(&a), Some(&b)) = (index.get(&from), index.get(&to)) else {
                         continue;
                     };
-                    if !matches!(&o.electrical,Some(ElectricalData::Switch {conductors}) if full_conductors(conductors))
+                    let Some(ElectricalData::Switch { conductors }) = &o.electrical else {
+                        return Err(unsupported(format!(
+                            "{} : interrupteur ABC ou ABCN explicite requis",
+                            o.name
+                        )));
+                    };
+                    if (!full_conductors(conductors) && !phase_conductors(conductors))
+                        || !same_conductors(conductors, &bus_data[a].conductors)
+                        || !same_conductors(conductors, &bus_data[b].conductors)
                     {
                         return Err(unsupported(format!(
-                            "{} : interrupteur ABCN explicite requis",
+                            "{} : les conducteurs de l'interrupteur doivent correspondre exactement à ceux de ses deux bus",
                             o.name
                         )));
                     }
@@ -348,17 +501,52 @@ impl Circuit {
                         id: o.id,
                         a,
                         b,
-                        z: [[C::default(); 4]; 4],
-                        limit: None,
+                        model: EdgeModel::Line([[C::default(); 4]; 4]),
+                        current_limits: None,
                     });
                 }
-                Equipment::Transformer { from, to, .. }
-                    if index.contains_key(&from) && index.contains_key(&to) =>
-                {
-                    return Err(unsupported(format!(
-                        "{} : transformateurs non encore couverts par le moteur déséquilibré ; définir le réseau BT depuis son équivalent source secondaire",
-                        o.name
-                    )));
+                Equipment::Transformer {
+                    from,
+                    to,
+                    rated_va,
+                    uk_percent,
+                } if index.contains_key(&from) && index.contains_key(&to) => {
+                    let Some(ElectricalData::Transformer(data)) = &o.electrical else {
+                        return Err(unsupported(format!(
+                            "{} : données détaillées de transformateur requises",
+                            o.name
+                        )));
+                    };
+                    let a = index[&from];
+                    let b = index[&to];
+                    if !phase_conductors(&bus_data[a].conductors)
+                        || !full_conductors(&bus_data[b].conductors)
+                    {
+                        return Err(unsupported(format!(
+                            "{} : le côté HTA delta exige un bus ABC et le côté BT étoile un bus ABCN",
+                            o.name
+                        )));
+                    }
+                    if (data.from.rated_voltage_ll_v / (nominal[a] * 3.0_f64.sqrt()) - 1.0).abs()
+                        > 1e-10
+                        || (data.to.rated_voltage_ll_v / (nominal[b] * 3.0_f64.sqrt()) - 1.0).abs()
+                            > 1e-10
+                    {
+                        return Err(unsupported(format!(
+                            "{} : les tensions assignées des enroulements doivent correspondre aux tensions nominales des bus",
+                            o.name
+                        )));
+                    }
+                    let model = dyn_model(&o.name, data, rated_va, uk_percent)?;
+                    let from_limit = rated_va / (3.0_f64.sqrt() * data.from.rated_voltage_ll_v);
+                    let to_limit = rated_va / (3.0_f64.sqrt() * data.to.rated_voltage_ll_v);
+                    edges.push(Edge {
+                        id: o.id,
+                        a,
+                        b,
+                        model,
+                        current_limits: Some((from_limit, to_limit)),
+                    });
                 }
                 Equipment::Load {
                     bus, p_w, q_var, ..
@@ -431,6 +619,70 @@ impl Circuit {
                 "jeux de barres en service non alimentés : le réseau ABCN doit être radial et connecté",
             ));
         }
+        let mut transformer_boundaries = BTreeSet::new();
+        for (node, parent_edge) in parent.iter().enumerate() {
+            let Some((parent_node, edge_index)) = parent_edge else {
+                continue;
+            };
+            let edge = &edges[*edge_index];
+            if edge.transformer() {
+                if edge.a != *parent_node || edge.b != node {
+                    return Err(unsupported(format!(
+                        "{} : le transformateur Dyn doit être orienté du réseau HTA amont vers le réseau BT aval",
+                        network.objects[&edge.id].name
+                    )));
+                }
+                transformer_boundaries.insert(node);
+            }
+        }
+        let mut earth = vec![];
+        for (node, data) in bus_data.iter().enumerate() {
+            let name = &network.objects[&buses[node]].name;
+            if phase_conductors(&data.conductors) {
+                if data.neutral_grounding != Grounding::NotApplicable {
+                    return Err(unsupported(format!(
+                        "{name} : un bus sans conducteur N doit déclarer la mise à la terre non applicable"
+                    )));
+                }
+                continue;
+            }
+            if node == root {
+                continue;
+            }
+            if transformer_boundaries.contains(&node) {
+                if !grounded(&data.neutral_grounding) {
+                    return Err(unsupported(format!(
+                        "{name} : le neutre au secondaire Dyn doit être directement mis à la terre"
+                    )));
+                }
+                continue;
+            }
+            let mut cursor = node;
+            let mut below_transformer = false;
+            while let Some((parent_node, edge_index)) = parent[cursor] {
+                if edges[edge_index].transformer() {
+                    below_transformer = true;
+                    break;
+                }
+                cursor = parent_node;
+            }
+            match &data.neutral_grounding {
+                Grounding::Isolated => {}
+                Grounding::Impedance { ohm } if !below_transformer => {
+                    earth.push((node, C::new(ohm.r, ohm.x)))
+                }
+                Grounding::Impedance { .. } => {
+                    return Err(unsupported(format!(
+                        "{name} : les prises de terre BT supplémentaires derrière un transformateur Dyn nécessitent le prochain modèle de terre multi-zones"
+                    )));
+                }
+                _ => {
+                    return Err(unsupported(format!(
+                        "{name} : préciser l'impédance de terre du neutre ou déclarer l'absence de prise de terre locale"
+                    )));
+                }
+            }
+        }
         let magnitude = nominal[root] * voltage_pu;
         let source = std::array::from_fn(|i| {
             if i == 3 {
@@ -444,9 +696,14 @@ impl Circuit {
             return Err(CalculationError::Numerical(buses[root]));
         }
         let earth = GroundSystem::build(earth, &edges, &parent, cancel)?;
+        let conductors = bus_data
+            .iter()
+            .map(|data| data.conductors.clone())
+            .collect();
         Ok(Self {
             earth,
             buses,
+            conductors,
             nominal,
             edges,
             injections,
@@ -495,9 +752,9 @@ impl Circuit {
         }
         for &i in self.order.iter().rev() {
             check_cancel(cancel)?;
-            if let Some((p, _)) = self.parent[i] {
-                let child = currents[i];
-                for (target, value) in currents[p].iter_mut().zip(child) {
+            if let Some((p, edge)) = self.parent[i] {
+                let upstream = self.edges[edge].upstream_current(currents[i]);
+                for (target, value) in currents[p].iter_mut().zip(upstream) {
                     *target = *target + value;
                 }
             }
@@ -563,12 +820,7 @@ impl Circuit {
             check_cancel(cancel)?;
             if let Some((p, e)) = self.parent[i] {
                 let upstream = voltage[p];
-                for (k, value) in voltage[i].iter_mut().enumerate() {
-                    let drop = (0..4).fold(C::default(), |sum, j| {
-                        sum + self.edges[e].z[k][j] * currents[i][j]
-                    });
-                    *value = upstream[k] - drop;
-                }
+                voltage[i] = self.edges[e].downstream_voltage(upstream, currents[i]);
                 if voltage[i].iter().any(|v| !v.finite()) {
                     return Err(CalculationError::Numerical(self.buses[i]));
                 }
@@ -601,7 +853,8 @@ pub fn solve_cancellable(
 ) -> Result<LoadFlow> {
     options.validate()?;
     let circuit = Circuit::build(network, cancel)?;
-    let mut voltage = vec![circuit.source; circuit.buses.len()];
+    let zero_currents = vec![[C::default(); 4]; circuit.buses.len()];
+    let mut voltage = circuit.sweep(&zero_currents, cancel)?;
     let mut residual = f64::INFINITY;
     for iteration in 1..=options.max_iterations {
         check_cancel(cancel)?;
@@ -627,7 +880,8 @@ pub fn solve_cancellable(
         voltage = corrected;
         let mut buses = vec![];
         let mut branches = vec![];
-        let mut loss = C::default();
+        let mut line_loss = C::default();
+        let mut transformer_loss = C::default();
         for (i, &id) in circuit.buses.iter().enumerate() {
             check_cancel(cancel)?;
             let pn: [C; 3] = std::array::from_fn(|k| voltage[i][k] - voltage[i][3]);
@@ -662,6 +916,7 @@ pub fn solve_cancellable(
             }
             buses.push(BusResult {
                 id,
+                conductors: circuit.conductors[i].clone(),
                 conductor_voltages_v: voltage[i].map(Into::into),
                 phase_neutral,
                 phase_phase_v,
@@ -670,16 +925,16 @@ pub fn solve_cancellable(
             });
             if let Some((p, e)) = circuit.parent[i] {
                 let edge = &circuit.edges[e];
-                let from = power(voltage[p], currents[i]);
+                let upstream_current = edge.upstream_current(currents[i]);
+                let from = power(voltage[p], upstream_current);
                 let to = power(voltage[i], currents[i]);
-                let drop: Vector = std::array::from_fn(|k| {
-                    (0..4).fold(C::default(), |sum, j| sum + edge.z[k][j] * currents[i][j])
-                });
-                let branch_loss = power(drop, currents[i]);
-                loss = loss + branch_loss;
-                let loading = edge.limit.map(|limit| {
-                    currents[i].iter().map(|v| v.abs()).fold(0.0, f64::max) / limit * 100.0
-                });
+                let branch_loss = from - to;
+                if edge.transformer() {
+                    transformer_loss = transformer_loss + branch_loss;
+                } else {
+                    line_loss = line_loss + branch_loss;
+                }
+                let loading = edge.loading(upstream_current, currents[i]);
                 if !from.finite()
                     || !to.finite()
                     || !branch_loss.finite()
@@ -692,6 +947,8 @@ pub fn solve_cancellable(
                     from_bus: circuit.buses[p],
                     to_bus: id,
                     currents_a: currents[i].map(Into::into),
+                    currents_from_a: upstream_current.map(Into::into),
+                    currents_to_a: currents[i].map(Into::into),
                     p_from_w: from.re,
                     q_from_var: from.im,
                     p_to_w: to.re,
@@ -702,7 +959,6 @@ pub fn solve_cancellable(
                 });
             }
         }
-        let line_loss = loss;
         let mut grounding_loss = C::default();
         let mut earth_sum = C::default();
         let mut groundings = vec![];
@@ -731,14 +987,27 @@ pub fn solve_cancellable(
         if !earth_sum.finite() || !earth_sum.abs().is_finite() {
             return Err(CalculationError::Numerical(circuit.buses[circuit.order[0]]));
         }
-        groundings.push(GroundingResult {
-            bus_id: circuit.buses[circuit.order[0]],
-            current_to_earth_a: (earth_sum * -1.0).into(),
-            voltage_v: C::default().into(),
-            loss_w: 0.0,
-            loss_var: 0.0,
-        });
-        loss = loss + grounding_loss;
+        for (node, parent_edge) in circuit.parent.iter().enumerate() {
+            if parent_edge.is_some_and(|(_, edge)| circuit.edges[edge].transformer()) {
+                groundings.push(GroundingResult {
+                    bus_id: circuit.buses[node],
+                    current_to_earth_a: C::default().into(),
+                    voltage_v: C::default().into(),
+                    loss_w: 0.0,
+                    loss_var: 0.0,
+                });
+            }
+        }
+        if full_conductors(&circuit.conductors[circuit.order[0]]) {
+            groundings.push(GroundingResult {
+                bus_id: circuit.buses[circuit.order[0]],
+                current_to_earth_a: (earth_sum * -1.0).into(),
+                voltage_v: C::default().into(),
+                loss_w: 0.0,
+                loss_var: 0.0,
+            });
+        }
+        let loss = line_loss + transformer_loss + grounding_loss;
         let source = power(circuit.source, currents[circuit.order[0]]);
         let net = circuit
             .injections
@@ -753,12 +1022,14 @@ pub fn solve_cancellable(
             iterations:iteration,residual_pu:residual,source_p_w:source.re,source_q_var:source.im,
             net_demand_p_w:net.re,net_demand_q_var:net.im,total_loss_w:loss.re,total_loss_var:loss.im,
             balance_error_va:balance,line_loss_w:line_loss.re,line_loss_var:line_loss.im,
+            transformer_loss_w:transformer_loss.re,transformer_loss_var:transformer_loss.im,
             grounding_loss_w:grounding_loss.re,grounding_loss_var:grounding_loss.im,groundings,buses,branches,
             assumptions:vec![
-                "Réseau radial ABCN, matrice primitive complète, source de tension équilibrée idéale avec neutre fixé à la terre.".into(),
+                "Réseau radial ABC/ABCN, matrices primitives complètes et source de tension équilibrée idéale.".into(),
                 "Prises de terre du neutre résolues vers une référence de terre équipotentielle commune ; couplages entre électrodes et potentiels locaux du sol non modélisés.".into(),
-                "Aucun shunt de ligne, transformateur ou point étoile flottant. Impédances de source de défaut non utilisées en régime permanent.".into(),
-                "Taux de charge : limite de courant renseignée appliquée uniformément aux quatre conducteurs ; aucun calcul thermique ni harmonique.".into(),
+                "Transformateurs couverts : Dyn HTA/BT, secondaire étoile à neutre directement mis à la terre, excitation nulle et impédance homopolaire déclarée ; prises de terre BT aval supplémentaires non couvertes.".into(),
+                "Aucun shunt de ligne ni point étoile flottant. Impédances de source de défaut non utilisées en régime permanent.".into(),
+                "Taux de charge : limite de ligne appliquée aux conducteurs et courants assignés des deux enroulements ; aucun calcul thermique ni harmonique.".into(),
             ],
         });
     }

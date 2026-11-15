@@ -1,42 +1,50 @@
-# Régime permanent déséquilibré — premier jalon BT ABCN
+# Régime permanent déséquilibré — réseau radial ABC/ABCN
 
-Moteur : `radial-four-wire-0.2`, dans `src/unbalanced.rs`.
-Il couvre les réseaux radiaux à quatre conducteurs, à un seul niveau de tension,
-alimentés par une source de tension équilibrée idéale. Le neutre est représenté
-sans élimination, avec ses impédances propres et ses couplages aux phases.
+Moteur : `radial-four-wire-0.3`, dans `src/unbalanced.rs`.
+Il couvre les réseaux radiaux BT à quatre conducteurs et un premier franchissement
+HTA/BT Dyn depuis un réseau amont ABC alimenté par une source équilibrée idéale.
+Le neutre BT est représenté sans élimination, avec ses impédances propres et ses
+couplages aux phases.
 Ce jalon est une première partie du moteur HTA/BT déséquilibré prévu pour la V1.
 
 ## Domaine et données requises
 
-- Données détaillées A/B/C/N sur tous les jeux de barres et tronçons actifs.
-- Source active unique, raccordée à un bus dont le neutre est directement mis
-  à la terre ; les deux déclarations de régime de neutre doivent être cohérentes.
+- Données détaillées A/B/C ou A/B/C/N sur tous les jeux de barres et branches actifs ;
+  les conducteurs d'une ligne ou d'un interrupteur correspondent à ses deux bus.
+- Source active unique. Sur une frontière BT ABCN, son neutre est directement
+  mis à la terre ; sur le côté HTA ABC, aucun conducteur N n'est inventé.
 - Aux autres bus, `isolated` signifie aucune prise de terre locale : leur
   conducteur N reste connecté au neutre amont par les tronçons. Une déclaration
   `impedance` ajoute une prise de terre, éventuellement idéale (R = X = 0).
-- Matrices primitives série 4×4, avec ordre des conducteurs explicite. Elles
+- Matrices primitives série 3×3 ou 4×4, avec ordre des conducteurs explicite. Elles
   peuvent être dissymétriques entre phases et posséder des couplages mutuels,
   sous réserve des contrôles de réciprocité et de passivité du modèle.
-- Interrupteurs fermés ABCN idéaux ; les interrupteurs ouverts sont exclus.
+- Interrupteurs fermés ABC ou ABCN idéaux ; les interrupteurs ouverts sont exclus.
+- Transformateur Dyn orienté HTA vers BT, côté HTA delta ABC, côté BT étoile
+  ABCN avec neutre exposé et directement mis à la terre. Tensions assignées
+  cohérentes avec les bus, pertes fer et courant à vide explicitement nuls,
+  impédance homopolaire renseignée et prise fixe autorisée.
 - Charges et productions P/Q constantes avec connexion détaillée phase-neutre,
   entre phases, étoile triphasée avec neutre ou triangle triphasé.
 - Réseau en service connecté, sans boucle ni branche parallèle fermée.
 
 La présence de matrices est obligatoire : le moteur ne reconstruit pas une
 impédance de neutre depuis les seuls R/X du modèle historique.
-Les phases manquantes, les tronçons monophasés,
-impédances de terre non nulles à la source, sources multiples, points étoile
-flottants, shunts non nuls et transformateurs ne sont pas encore pris en charge.
+Les phases manquantes, les tronçons monophasés, impédances de terre non nulles
+à la source, sources multiples, points étoile flottants, shunts non nuls, autres
+couplages de transformateurs et prises de terre supplémentaires derrière un Dyn
+ne sont pas encore pris en charge.
 Ils sont refusés explicitement. Les objets hors service et les branchements
 à des bus hors service sont exclus du calcul, comme pour le moteur équilibré.
 
-Pour étudier un départ BT, placer la frontière amont à l'équivalent source du
-secondaire du poste. Les impédances de séquence de la source et les contributions
+Pour étudier un départ BT sans poste explicite, placer la frontière amont à
+l'équivalent source du secondaire. Le modèle Dyn permet sinon de partir du bus
+HTA amont. Les impédances de séquence de la source et les contributions
 au défaut sont conservées comme données mais ne sont pas utilisées ici.
 Les harmoniques, courants de fuite et potentiels locaux du sol ne sont pas
 calculés. Les courants de retour par les impédances de terre déclarées sont
-calculés vers une référence commune, sans couplage entre électrodes. Ce premier moteur ne remplace pas encore une étude complète HTA/BT
-avec transformateurs et représentation détaillée du sol.
+calculés vers une référence commune, sans couplage entre électrodes. Le modèle
+ne remplace pas une représentation détaillée du sol ou des noyaux magnétiques.
 
 ## Conventions numériques
 
@@ -62,11 +70,12 @@ La source impose les angles A = 0°, B = −120°, C = +120° et VN = 0. Sa tens
 phase-neutre est `Unominale_composée × voltage_pu / sqrt(3)`. Les résultats par
 phase en pu utilisent `Unominale_composée / sqrt(3)` comme base.
 
-Le moteur utilise un balayage arrière/avant par sommation des quatre courants :
+Le moteur utilise un balayage arrière/avant par sommation des courants :
 
 1. Calculer les courants des injections d'après leurs tensions aux bornes.
 2. Sommer les courants de chaque conducteur depuis les feuilles vers la source.
-3. Recalculer les quatre tensions vers l'aval par `Vaval = Vamont − Z4×4 × I4`.
+3. Recalculer les tensions vers l'aval par la matrice de ligne ou la relation
+   de transformation en composantes symétriques.
 4. Recalculer les courants puis effectuer un balayage de contrôle.
 
 Le résidu est le maximum des écarts de phaseurs de tension du balayage de
@@ -81,6 +90,42 @@ La distinction entre neutre explicite et terre est également présentée dans
 les [conventions OpenDSS / EPRI](https://opendss.epri.com/NeutralRules.html).
 L'implémentation et les validations de CalcElec sont propres au projet ; aucune
 comparaison numérique avec ces outils n'a encore été effectuée.
+
+## Transformateur Dyn — extension 0.3
+
+Le côté BT est ramené en composantes symétriques. Avec `a = exp(j120°)`, les
+composantes sont calculées explicitement depuis A/B/C. Le rapport `r` inclut la
+position fixe de prise ; l'angle `θ` vient du groupe horaire (`−clock × 30°`,
+normalisé). Les séquences directe et inverse utilisent des rotations opposées :
+
+```text
+V1_BT = exp(jθ) / r × V1_HTA − Z1_BT × I1_BT
+V2_BT = exp(−jθ) / r × V2_HTA − Z1_BT × I2_BT
+V0_BT =                         − Z0_BT × I0_BT
+
+I1_HTA = exp(−jθ) / r × I1_BT
+I2_HTA = exp(jθ)  / r × I2_BT
+I0_HTA = 0
+```
+
+`Z1_BT` provient de uk et des pertes cuivre sur la base triphasée assignée,
+ramenée en ohms au secondaire. `Z0_BT` est l'impédance homopolaire déclarée côté
+HTA divisée par `r²`. Le triangle bloque le courant homopolaire dans les lignes
+HTA ; le modèle conserve son effet sur les tensions et pertes BT. Les courants
+des deux enroulements sont donc distincts et exportés séparément.
+
+Le secondaire constitue dans ce jalon une frontière de terre idéale avec
+`VN = 0`. Le courant de neutre métallique rejoint le point étoile ; il ne doit
+pas être confondu avec un courant d'électrode. Les prises de terre supplémentaires
+en aval sont refusées tant que la résolution des terres n'est pas découpée en
+zones séparées par les transformateurs.
+
+Le modèle reste un équivalent de séquences : pas de saturation, excitation,
+couplage magnétique détaillé du noyau ni harmoniques. Le rôle du delta dans le
+blocage homopolaire et l'importance des données de noyau sont documentés par le
+[modèle généralisé OpenDSS / EPRI](https://opendss.epri.com/GeneralizedTransformermodel.html)
+et sa note sur les [effets de noyau](https://opendss.epri.com/ModelingTransformerCoreEffectsin.html).
+CalcElec ne revendique pas une équivalence complète avec ce modèle nodal général.
 
 ## Prises de terre du neutre — extension 0.2
 
@@ -134,8 +179,9 @@ ces logiciels ou publications n'est revendiquée à ce stade.
 
 ## Résultats et traçabilité
 
-Par bus : phaseurs A/B/C/N par rapport à la terre source, tensions et angles
-A-N/B-N/C-N, tensions composées AB/BC/CA, potentiel du neutre et rapport de
+Par bus : phaseurs A/B/C/N par rapport à la terre source, conducteurs présents,
+tensions et angles A-N/B-N/C-N (phase-terre lorsqu'un bus ABC n'a pas de N),
+tensions composées AB/BC/CA, potentiel du neutre et rapport de
 séquence inverse/directe U2/U1. Ce dernier est calculé sur les tensions
 phase-neutre ; ce n'est pas l'écart maximal entre trois modules de tension.
 
@@ -152,13 +198,18 @@ Le résultat 0.2 ajoute les champs `line_loss_w`, `line_loss_var`,
 indique le bus, le phaseur du courant vers la terre, celui de VN et ses puissances
 active/réactive. Le tableau de l'application montre les modules, angles et pertes.
 Le survol d'un bus sur la carte indique également son courant de terre.
-Les champs `total_loss_w/var` sont les sommes lignes + terres. Les flux de
+La version 0.3 ajoute `conductors` sur les bus,
+`currents_from_a` / `currents_to_a` sur les branches et
+`transformer_loss_w/var`. `currents_a` reste le courant côté aval pour les
+lecteurs existants. Les champs `total_loss_w/var` sont les sommes lignes +
+transformateurs + terres. Les flux de
 branche restent ceux des conducteurs métalliques ; le courant de terre peut
 ainsi être différent du courant du conducteur N.
 
-Le taux de charge est le maximum des quatre modules de courant, rapporté à
-`max_current_a`. Cette limite unique est appliquée aux quatre conducteurs dans
-ce jalon. Des limites distinctes selon les conducteurs et technologies devront
+Le taux de charge d'une ligne est le maximum des modules de courant rapporté à
+`max_current_a`. Celui d'un transformateur est le maximum des taux des phases
+sur ses deux côtés, à partir de `Sn/(sqrt(3) Un)`. Des limites distinctes selon
+les conducteurs et technologies devront
 être ajoutées avec le catalogue ; aucun calcul thermique n'est réalisé ici.
 
 Le résultat conserve le projet, sa version, la version du moteur, les options et
@@ -195,6 +246,25 @@ phases, l'accord avec le moteur équilibré, les connexions triangle, les flux
 inverses, les matrices dissymétriques, la conservation des courants à une
 bifurcation, la conservation de puissance et le refus des domaines non couverts.
 
+## Exemple Dyn11 HTA/BT
+
+Ouvrir `examples/reference-dyn-transformer.json`, choisir **Déséquilibré ABCN**
+et lancer le calcul. Le cas synthétique contient un Dyn11 20 kV/400 V, 100 kVA,
+uk 4 %, pertes cuivre assignées 1 kW et trois charges BT de 12/8/5 kW avec une
+demande réactive totale de 3,4 kvar.
+
+```sh
+cargo run -- --unbalanced-load-flow examples/reference-dyn-transformer.json
+cargo run -- --reference-case dyn-transformer nouveau-projet.json
+```
+
+Le calcul initial converge en 4 itérations. Les tensions A-N/B-N/C-N sont proches
+de 229,608 / 230,087 / 230,435 V, avec environ 71,972 W de pertes actives et
+278,251 var de pertes réactives dans le transformateur. Le courant homopolaire
+des lignes HTA et leur conducteur N restent nuls ; le bilan est inférieur à
+0,001 VA. Le cas à vide vérifie séparément 400/sqrt(3) V et le déphasage +30°.
+Les valeurs sont destinées à la validation logicielle, pas à un catalogue Enedis.
+
 ## Exemple avec terres intermédiaire et terminale
 
 Ouvrir `examples/reference-grounded-bt.json`, conserver **Déséquilibré ABCN**
@@ -219,5 +289,6 @@ neutre/terre à sa solution analytique complexe, puis deux prises de terre à le
 équivalent parallèle résistif. Ils vérifient aussi le neutre fixé idéalement,
 les connexions idéales redondantes, les impédances capacitives, les lois de
 Kirchhoff avec couplages mutuels, la séparation des pertes et l'affichage des
-résultats. Les transformateurs, le neutre source raccordé par une impédance
-non nulle et le modèle de sol détaillé restent des extensions à réaliser.
+résultats. Les autres couplages de transformateurs, les terres BT multi-zones,
+le neutre source raccordé par une impédance non nulle et le modèle de sol détaillé
+restent des extensions à réaliser.

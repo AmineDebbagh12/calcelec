@@ -608,7 +608,7 @@ impl Desktop {
             }
         });
         if self.use_unbalanced {
-            ui.small("ABCN : départ radial à tension unique, source idéale à neutre directement à la terre, prises de terre aval vers une référence commune, sans transformateur. Exemple : examples/reference-grounded-bt.json.");
+            ui.small("ABC/ABCN radial : lignes quatre fils et transformateurs Dyn HTA/BT à neutre secondaire directement mis à la terre. Exemples : reference-grounded-bt.json et reference-dyn-transformer.json.");
         } else if self.simplified_calculation {
             ui.small("Hypothèses : équivalents équilibrés des charges monophasées ; transformateurs purement réactifs, rapport nominal, sans déphasage. Aucun calcul du neutre.");
         }
@@ -631,8 +631,8 @@ impl Desktop {
             r.iterations, r.residual_pu, r.balance_error_va
         ));
         ui.small(format!(
-            "Pertes des lignes : {:.3} W · Pertes des prises de terre : {:.3} W",
-            r.line_loss_w, r.grounding_loss_w
+            "Pertes des lignes : {:.3} W · transformateurs : {:.3} W · prises de terre : {:.3} W",
+            r.line_loss_w, r.transformer_loss_w, r.grounding_loss_w
         ));
         ui.collapsing("Hypothèses et traçabilité du calcul ABCN", |ui| {
             ui.label(format!(
@@ -659,15 +659,15 @@ impl Desktop {
             }
         });
         let mut clicked = None;
-        ui.small("Tensions phase-neutre : V / angle (°) ; |VN| : potentiel du neutre par rapport à la terre source.");
+        ui.small("Tensions phase-neutre, ou phase-terre sur un bus ABC : V / angle (°) ; |VN| : potentiel du neutre lorsqu'il existe.");
         egui::Grid::new("unbalanced_buses")
             .striped(true)
             .show(ui, |ui| {
                 for title in [
                     "Jeu de barres",
-                    "A-N",
-                    "B-N",
-                    "C-N",
+                    "A-N/terre",
+                    "B-N/terre",
+                    "C-N/terre",
                     "|VN| (V)",
                     "U2/U1 (%)",
                 ] {
@@ -702,7 +702,7 @@ impl Desktop {
                 }
             });
         ui.separator();
-        ui.strong("Courants par conducteur — sens source vers aval");
+        ui.strong("Courants par conducteur côté aval — sens source vers aval");
         egui::Grid::new("unbalanced_branches")
             .striped(true)
             .show(ui, |ui| {

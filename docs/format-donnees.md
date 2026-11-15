@@ -175,9 +175,12 @@ Le résultat du [moteur déséquilibré](calcul-desequilibre.md) utilise la mêm
 traçabilité avec ses propres options et son `solver_version`. Il exporte des
 phaseurs et des tableaux A/B/C/N, des tensions phase-neutre et composées,
 le potentiel du neutre et U2/U1. La version de moteur `radial-four-wire-0.2`
-ajoute les prises de terre (`groundings`) et sépare pertes des lignes, pertes des
-terres et pertes totales. Les lecteurs de résultats doivent tenir compte de la
-version du moteur : le type de résultat 0.2 exige ces nouveaux champs. Le schéma
+ajoute les prises de terre (`groundings`) et sépare pertes des lignes et des terres.
+La version `radial-four-wire-0.3` ajoute les conducteurs présents sur chaque bus,
+les courants amont/aval de branche et les pertes propres aux transformateurs.
+Le champ historique `currents_a` conserve le courant côté aval. Les lecteurs de
+résultats doivent tenir compte de la version du moteur : le type 0.3 exige les
+nouveaux champs, sans valeur inventée à la lecture d'un ancien rapport. Le schéma
 de réseau reste inchangé en version 4 ; les anciennes déclarations de terres,
 auparavant refusées au calcul, sont maintenant exploitées dans le domaine pris
 en charge.

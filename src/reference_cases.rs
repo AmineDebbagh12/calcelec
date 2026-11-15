@@ -204,6 +204,54 @@ pub fn transformer() -> Network {
     )
 }
 
+/// Synthetic Dyn11 HTA/BT case with unequal phase-to-neutral loads.
+pub fn dyn_transformer() -> Network {
+    let mut n = transformer();
+    n.name = "Référence synthétique — transformateur Dyn11 déséquilibré".into();
+    n.objects
+        .retain(|_, object| !matches!(object.equipment, Equipment::Load { .. }));
+    let secondary = n
+        .objects
+        .values()
+        .find(|object| object.name == "Secondaire 400 V")
+        .unwrap()
+        .id;
+    let transformer = n
+        .objects
+        .values_mut()
+        .find(|object| matches!(object.equipment, Equipment::Transformer { .. }))
+        .unwrap();
+    transformer.name = "Transformateur analytique Dyn11".into();
+    let Some(ElectricalData::Transformer(data)) = &mut transformer.electrical else {
+        unreachable!()
+    };
+    data.from.connection = WindingConnection::Delta;
+    data.from.grounding = Grounding::NotApplicable;
+    data.clock = 11;
+    for (phase, conductor, p_w, q_var, y) in [
+        (Phase::A, Conductor::A, 12000.0, 1800.0, 20.0),
+        (Phase::B, Conductor::B, 8000.0, 1000.0, 0.0),
+        (Phase::C, Conductor::C, 5000.0, 600.0, -20.0),
+    ] {
+        let load = object(
+            &format!("Charge BT phase {phase:?}"),
+            Equipment::Load {
+                bus: secondary,
+                p_w,
+                q_var,
+                phase,
+            },
+            ElectricalData::Injection(InjectionData {
+                connection: InjectionConnection::PhaseNeutral { phase: conductor },
+                fault_contribution: FaultContribution::None,
+            }),
+            Coordinate(20.0, y),
+        );
+        n.objects.insert(load.id, load);
+    }
+    n
+}
+
 /// Synthetic BT feeder with distinct single-phase loads and a single-phase PV injection.
 pub fn unbalanced_bt() -> Network {
     let mut n = four_wire();
