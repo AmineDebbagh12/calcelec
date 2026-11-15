@@ -40,8 +40,11 @@ du tracé. L'exemple utilise un repère métrique local fictif ; le modèle perm
 aussi de déclarer des coordonnées Lambert-93, sans reprojection. Aucun fond de
 carte externe n'est chargé.
 
-Le bouton **Vue topologique** conserve la vue de connectivité des jeux de barres
-et des branches. Il ne constitue pas encore un éditeur unifilaire complet.
+Le bouton **Vue unifilaire dérivée** présente la connectivité sans créer une
+seconde disposition à maintenir : les colonnes viennent des raccordements et
+l'ordre vertical des positions géographiques. Les ouvrages y sont sélectionnables
+et leurs propriétés restent modifiables, mais les raccordements, positions et
+tracés se modifient exclusivement dans la vue géographique.
 Le diagnostic d'alimentation vérifie uniquement
 les connexions, sans calcul électrique ni prise en compte d'une production îlotée.
 

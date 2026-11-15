@@ -21,6 +21,23 @@ fn numeric(ui: &mut egui::Ui, label: &str, value: &mut f64) {
         ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(6));
     });
 }
+fn diagram_northing(object: &calcelec::model::Object) -> f64 {
+    let coordinates = object.geometry.coordinates();
+    if coordinates.is_empty() {
+        0.0
+    } else {
+        coordinates.iter().map(|p| p.1).sum::<f64>() / coordinates.len() as f64
+    }
+}
+fn diagram_northing_order(
+    a: &calcelec::model::Object,
+    b: &calcelec::model::Object,
+) -> std::cmp::Ordering {
+    diagram_northing(b)
+        .total_cmp(&diagram_northing(a))
+        .then_with(|| a.name.cmp(&b.name))
+        .then_with(|| a.id.cmp(&b.id))
+}
 fn bus_choice(ui: &mut egui::Ui, network: &Network, label: &str, value: &mut Option<Id>) {
     let selected = value
         .and_then(|id| network.objects.get(&id))
@@ -39,6 +56,14 @@ fn bus_choice(ui: &mut egui::Ui, network: &Network, label: &str, value: &mut Opt
                 ui.selectable_value(value, Some(bus.id), &bus.name);
             }
         });
+}
+fn readonly_bus(ui: &mut egui::Ui, network: &Network, label: &str, id: Id) {
+    let name = network
+        .objects
+        .get(&id)
+        .map(|o| o.name.as_str())
+        .unwrap_or("borne absente");
+    ui.label(format!("{label} : {name}"));
 }
 fn required_bus_choice(ui: &mut egui::Ui, network: &Network, label: &str, value: &mut Id) {
     let mut optional = Some(*value);
@@ -298,21 +323,27 @@ impl Desktop {
     }
     fn toolbox(&mut self, ui: &mut egui::Ui) {
         ui.heading("Toolbox");
-        ui.horizontal_wrapped(|ui| {
-            for (mode, label) in [
-                (MapMode::Select, "Sélection"),
-                (MapMode::Move, "Déplacer"),
-                (MapMode::Vertex, "Sommets"),
-                (MapMode::Place, "Placer"),
-                (MapMode::Trace, "Raccorder"),
-            ] {
-                if ui.selectable_value(&mut self.tool, mode, label).changed() {
-                    self.geographic = true;
-                    self.draft = None;
-                    self.map.cancel_drag();
+        if self.geographic {
+            ui.horizontal_wrapped(|ui| {
+                for (mode, label) in [
+                    (MapMode::Select, "Sélection"),
+                    (MapMode::Move, "Déplacer"),
+                    (MapMode::Vertex, "Sommets"),
+                    (MapMode::Place, "Placer"),
+                    (MapMode::Trace, "Raccorder"),
+                ] {
+                    if ui.selectable_value(&mut self.tool, mode, label).changed() {
+                        self.draft = None;
+                        self.map.cancel_drag();
+                    }
                 }
-            }
-        });
+            });
+        } else {
+            self.tool = MapMode::Select;
+            self.draft = None;
+            self.map.cancel_drag();
+            ui.small("Vue unifilaire dérivée : sélection et propriétés uniquement. Les raccordements et la géométrie se modifient dans la vue géographique.");
+        }
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
@@ -347,6 +378,9 @@ impl Desktop {
                 self.report(r);
             }
         });
+        if !self.geographic {
+            return;
+        }
         match self.tool {
             MapMode::Select => {
                 ui.small("Sélectionnez un objet sur la carte ou dans le tableau.");
@@ -1037,7 +1071,13 @@ impl Desktop {
                 ui.small("Valider avec Créer une version. Un champ vide conserve seulement le modèle historique simplifié.");
                 for missing in calcelec::electrical::missing_data(&self.network).iter().filter(|m|m.object_id==id) {ui.label(&missing.message);}
             });
-            self.geometry_editor(ui, &object);
+            if self.geographic {
+                self.geometry_editor(ui, &object);
+            } else {
+                ui.separator();
+                ui.label("Géométrie géographique");
+                ui.small("Lecture seule dans la vue unifilaire. Revenez à la vue géographique pour déplacer l’ouvrage ou modifier son tracé.");
+            }
             ui.collapsing("Paramètres du modèle (SI)", |ui| {
                 ui.monospace(serde_json::to_string_pretty(&object.equipment).unwrap_or_default());
             });
@@ -1091,7 +1131,11 @@ impl Desktop {
                     numeric(ui, "Tension composée nominale (V)", voltage_v)
                 }
                 Equipment::Source { bus, voltage_pu } => {
-                    required_bus_choice(ui, &self.network, "Jeu de barres", bus);
+                    if self.geographic {
+                        required_bus_choice(ui, &self.network, "Jeu de barres", bus);
+                    } else {
+                        readonly_bus(ui, &self.network, "Jeu de barres", *bus);
+                    }
                     numeric(ui, "Tension source (pu)", voltage_pu);
                 }
                 Equipment::Line {
@@ -1102,8 +1146,13 @@ impl Desktop {
                     x_ohm_per_km,
                     max_current_a,
                 } => {
-                    required_bus_choice(ui, &self.network, "Départ", from);
-                    required_bus_choice(ui, &self.network, "Arrivée", to);
+                    if self.geographic {
+                        required_bus_choice(ui, &self.network, "Départ", from);
+                        required_bus_choice(ui, &self.network, "Arrivée", to);
+                    } else {
+                        readonly_bus(ui, &self.network, "Départ", *from);
+                        readonly_bus(ui, &self.network, "Arrivée", *to);
+                    }
                     numeric(ui, "Longueur électrique (m)", length_m);
                     numeric(ui, "R (ohm/km)", r_ohm_per_km);
                     numeric(ui, "X (ohm/km)", x_ohm_per_km);
@@ -1115,13 +1164,22 @@ impl Desktop {
                     rated_va,
                     uk_percent,
                 } => {
-                    required_bus_choice(ui, &self.network, "Côté 1", from);
-                    required_bus_choice(ui, &self.network, "Côté 2", to);
+                    if self.geographic {
+                        required_bus_choice(ui, &self.network, "Côté 1", from);
+                        required_bus_choice(ui, &self.network, "Côté 2", to);
+                    } else {
+                        readonly_bus(ui, &self.network, "Côté 1", *from);
+                        readonly_bus(ui, &self.network, "Côté 2", *to);
+                    }
                     numeric(ui, "Puissance assignée (VA)", rated_va);
                     numeric(ui, "uk (%)", uk_percent);
                 }
                 Equipment::Load { bus, phase, .. } | Equipment::Generator { bus, phase, .. } => {
-                    required_bus_choice(ui, &self.network, "Jeu de barres", bus);
+                    if self.geographic {
+                        required_bus_choice(ui, &self.network, "Jeu de barres", bus);
+                    } else {
+                        readonly_bus(ui, &self.network, "Jeu de barres", *bus);
+                    }
                     egui::ComboBox::from_id_salt("phase")
                         .selected_text(format!("{phase:?}"))
                         .show_ui(ui, |ui| {
@@ -1136,8 +1194,13 @@ impl Desktop {
                         });
                 }
                 Equipment::Switch { from, to, closed } => {
-                    required_bus_choice(ui, &self.network, "Départ", from);
-                    required_bus_choice(ui, &self.network, "Arrivée", to);
+                    if self.geographic {
+                        required_bus_choice(ui, &self.network, "Départ", from);
+                        required_bus_choice(ui, &self.network, "Arrivée", to);
+                    } else {
+                        readonly_bus(ui, &self.network, "Départ", *from);
+                        readonly_bus(ui, &self.network, "Arrivée", *to);
+                    }
                     ui.checkbox(closed, "Fermé");
                 }
             }
@@ -1224,7 +1287,9 @@ impl Desktop {
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 300.0), egui::Sense::hover());
         let painter = ui.painter_at(rect);
-        // Tree layout of the example; disconnected buses are placed in a final column.
+        // The layout is derived on every frame: topology determines columns and
+        // geographic northing determines the order inside each column. Nothing
+        // is persisted as a second, independently editable geometry.
         let mut depth = BTreeMap::new();
         for o in self.network.objects.values() {
             if let Equipment::Source { bus, .. } = o.equipment {
@@ -1263,7 +1328,7 @@ impl Desktop {
             .values()
             .filter(|o| matches!(o.equipment, Equipment::Bus { .. }))
             .collect();
-        buses.sort_by_key(|o| &o.name);
+        buses.sort_by(|a, b| diagram_northing_order(a, b));
         for o in buses {
             columns
                 .entry(depth.get(&o.id).copied().unwrap_or(last))
@@ -1285,6 +1350,7 @@ impl Desktop {
                 );
             }
         }
+        let mut object_positions = BTreeMap::new();
         for o in self.network.objects.values() {
             let ids = o.buses();
             if let [a, b] = ids.as_slice()
@@ -1296,24 +1362,51 @@ impl Desktop {
                     Color32::DARK_GRAY
                 };
                 painter.line_segment([*a, *b], Stroke::new(2.0, color));
-                if matches!(o.equipment, Equipment::Transformer { .. }) {
-                    painter.circle_stroke(a.lerp(*b, 0.5), 9.0, Stroke::new(2.0, color));
-                }
+                object_positions.insert(o.id, a.lerp(*b, 0.5));
+            }
+        }
+        let mut attachments: BTreeMap<Id, Vec<Id>> = BTreeMap::new();
+        for object in self.network.objects.values() {
+            if !matches!(object.equipment, Equipment::Bus { .. }) && object.buses().len() == 1 {
+                attachments
+                    .entry(object.buses()[0])
+                    .or_default()
+                    .push(object.id);
+            }
+        }
+        for (bus, ids) in &mut attachments {
+            ids.sort_by(|a, b| {
+                diagram_northing(&self.network.objects[b])
+                    .total_cmp(&diagram_northing(&self.network.objects[a]))
+                    .then_with(|| {
+                        self.network.objects[a]
+                            .name
+                            .cmp(&self.network.objects[b].name)
+                    })
+            });
+            let Some(bus_pos) = positions.get(bus) else {
+                continue;
+            };
+            for (index, id) in ids.iter().enumerate() {
+                let offset = (index as f32 - (ids.len() - 1) as f32 / 2.0) * 24.0;
+                let pos = *bus_pos + Vec2::new(0.0, offset - 38.0);
+                painter.line_segment([*bus_pos, pos], Stroke::new(1.5, Color32::DARK_GRAY));
+                object_positions.insert(*id, pos);
             }
         }
         let mut clicked = None;
-        for (id, pos) in positions {
-            let o = &self.network.objects[&id];
-            let color = if Some(id) == self.selected {
+        for (id, pos) in &positions {
+            let o = &self.network.objects[id];
+            let color = if Some(*id) == self.selected {
                 Color32::YELLOW
             } else if o.in_service {
                 Color32::from_rgb(70, 190, 175)
             } else {
                 Color32::GRAY
             };
-            painter.circle_filled(pos, 6.0, color);
+            painter.circle_filled(*pos, 6.0, color);
             painter.text(
-                pos + Vec2::new(0.0, 14.0),
+                *pos + Vec2::new(0.0, 14.0),
                 egui::Align2::CENTER_TOP,
                 &o.name,
                 egui::FontId::proportional(11.0),
@@ -1321,13 +1414,43 @@ impl Desktop {
             );
             if ui
                 .interact(
-                    egui::Rect::from_center_size(pos, Vec2::splat(24.0)),
-                    ui.scope_id().with(id),
+                    egui::Rect::from_center_size(*pos, Vec2::splat(24.0)),
+                    ui.scope_id().with(*id),
                     egui::Sense::click(),
                 )
                 .on_hover_text(&o.name)
                 .clicked()
             {
+                clicked = Some(*id);
+            }
+        }
+        for (id, pos) in object_positions {
+            let object = &self.network.objects[&id];
+            let color = if Some(id) == self.selected {
+                Color32::YELLOW
+            } else if object.in_service {
+                Color32::from_rgb(110, 180, 220)
+            } else {
+                Color32::GRAY
+            };
+            if matches!(object.equipment, Equipment::Transformer { .. }) {
+                painter.circle_stroke(pos + Vec2::new(-5.0, 0.0), 7.0, Stroke::new(2.0, color));
+                painter.circle_stroke(pos + Vec2::new(5.0, 0.0), 7.0, Stroke::new(2.0, color));
+            } else {
+                painter.rect_filled(
+                    egui::Rect::from_center_size(pos, Vec2::splat(10.0)),
+                    2.0,
+                    color,
+                );
+            }
+            let response = ui
+                .interact(
+                    egui::Rect::from_center_size(pos, Vec2::splat(24.0)),
+                    ui.scope_id().with(("unifilaire", id)),
+                    egui::Sense::click(),
+                )
+                .on_hover_text(format!("{} · {}", object.name, object.kind()));
+            if response.clicked() {
                 clicked = Some(id);
             }
         }
@@ -1394,7 +1517,14 @@ impl Desktop {
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.geographic, true, "Vue géographique");
-                ui.selectable_value(&mut self.geographic, false, "Vue topologique");
+                let changed = ui
+                    .selectable_value(&mut self.geographic, false, "Vue unifilaire dérivée")
+                    .changed();
+                if changed && !self.geographic {
+                    self.tool = MapMode::Select;
+                    self.draft = None;
+                    self.map.cancel_drag();
+                }
             });
             if self.geographic {
                 let preview = self.draft.clone().unwrap_or_default();
@@ -1486,6 +1616,35 @@ impl eframe::App for Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unifilar_order_is_derived_from_geography_and_has_no_editing_tool() {
+        let network = rural_example();
+        let mut buses: Vec<_> = network
+            .objects
+            .values()
+            .filter(|object| matches!(object.equipment, Equipment::Bus { .. }))
+            .take(2)
+            .cloned()
+            .collect();
+        buses[0].geometry = Geometry::Point(Coordinate(0.0, 10.0));
+        buses[1].geometry = Geometry::Point(Coordinate(0.0, 20.0));
+        buses.sort_by(diagram_northing_order);
+        assert_eq!(diagram_northing(&buses[0]), 20.0);
+        buses[0].geometry = Geometry::Point(Coordinate(0.0, -10.0));
+        buses.sort_by(diagram_northing_order);
+        assert_eq!(diagram_northing(&buses[0]), 10.0);
+
+        let mut app = Desktop::new();
+        let project = app.project.clone();
+        app.geographic = false;
+        app.tool = MapMode::Move;
+        let context = egui::Context::default();
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| app.render(ui));
+        output.textures_delta.clear();
+        assert!(app.tool == MapMode::Select);
+        assert_eq!(app.project, project);
+    }
+
     #[test]
     fn desktop_renders_and_records_an_edit_without_display_server() {
         let mut app = Desktop::new();

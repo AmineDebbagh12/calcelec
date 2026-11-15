@@ -26,7 +26,9 @@ données pour échanger des versions et des modifications.
 
 La **représentation géographique** fait partie de la V1 : chaque objet porte
 une géométrie, ponctuelle pour les postes et équipements ponctuels, et une
-polyligne pour les tronçons. La vue géographique complète la vue unifilaire.
+polyligne pour les tronçons. Elle constitue la source de vérité spatiale. La
+vue unifilaire est dérivée des raccordements et de l'agencement géographique ;
+elle ne possède pas de géométrie globale indépendante à maintenir.
 
 PowerFactory constitue une référence de catégories de fonctionnalités, sans
 objectif de reproduire son étendue dès la première version.
@@ -179,13 +181,18 @@ la conformité : celle-ci demande un périmètre défini et une validation dédi
 - Géométries persistées et versionnées, avec opérations de modification des
   coordonnées et des sommets. Un objet non encore localisé doit être signalé
   explicitement, sans position fictive inventée à l'import.
-- Distinguer topologie électrique, géométrie géographique et disposition du
-  schéma unifilaire. Un croisement de tracés ne crée pas une connexion.
+- Distinguer topologie électrique et géométrie géographique. Un croisement de
+  tracés ne crée pas une connexion. La disposition unifilaire est recalculée
+  depuis ces deux informations et n'est pas stockée comme une troisième source
+  de vérité éditable.
 - Distinguer longueur géométrique du tracé et longueur électrique renseignée ;
   toute éventuelle mise en cohérence doit être une action explicite et traçable.
 - Fond de carte facultatif : la consultation et l'édition du réseau doivent
   fonctionner hors ligne sans service externe.
-- Éditeur de schéma unifilaire : ajouter, relier, déplacer, supprimer, zoomer.
+- Vue unifilaire dérivée : consulter et sélectionner les ouvrages, modifier
+  leurs propriétés électriques, de charge ou d'état, et afficher les résultats.
+  Les raccordements, positions et tracés globaux se modifient exclusivement
+  depuis la vue géographique puis sont répercutés dans l'unifilaire.
 - Inspecteur des propriétés avec unités et validation des saisies.
 - Repérage des phases et du neutre dans les propriétés des raccordements.
 - Annuler/rétablir les modifications de modèle.
@@ -370,8 +377,11 @@ Voir le [modèle électrique détaillé](modele-electrique.md) pour les conventi
 et les données encore à compléter.
 Voir la [spécification du premier moteur](calcul-regime-permanent.md) pour son
 domaine et les cas analytiques déjà vérifiés.
-Le déplacement groupé des postes, l'ajustement automatique des tracés incidents
-et l'éditeur unifilaire complet restent à réaliser pour le jalon d'interface V1.
+Une première vue unifilaire dérivée est disponible : ses colonnes suivent la
+connectivité et son ordre vertical l'agencement géographique ; elle partage la
+sélection et l'inspecteur mais verrouille la géométrie. Le déplacement groupé
+des postes et l'ajustement automatique des tracés incidents restent à réaliser
+pour le jalon d'interface V1.
 
 | Jalon | Livrable | Critère de sortie |
 | --- | --- | --- |
