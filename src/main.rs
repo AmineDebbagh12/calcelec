@@ -37,6 +37,8 @@ fn command(args: &[String]) -> Result<()> {
                 project_id: project.id,
                 network_version: project.head(),
                 scenario,
+                solver_version: calcelec::unbalanced::SOLVER_VERSION.into(),
+                options: calcelec::unbalanced::Options::default(),
                 result,
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -150,6 +152,8 @@ fn run_scenario_load_flow(project_path: &str, scenario_path: &str, simplified: b
         project_id: project.id,
         network_version: project.head(),
         scenario,
+        solver_version: load_flow::SOLVER_VERSION.into(),
+        options,
         result,
     };
     println!("{}", serde_json::to_string_pretty(&report)?);

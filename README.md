@@ -61,6 +61,13 @@ enregistrements successifs sans recopier l'historique déjà stocké.
 Après redémarrage, renseigner le chemin de la base, lister ses projets puis charger
 celui souhaité, ou ouvrir un fichier projet exporté.
 
+Le panneau **Scénarios d'étude** permet de travailler sur le réseau de base ou
+sur plusieurs variantes de charge/production. Un scénario peut être créé,
+dupliqué, supprimé, importé ou exporté. Ses coefficients globaux sont complétés
+par des exceptions P/Q et en service par injection. Le calcul utilise le scénario
+sélectionné et l'export de résultat conserve son contenu, la version du réseau,
+les options et la version du moteur.
+
 ## Toolbox géographique
 
 La toolbox se trouve en haut du panneau droit. Les actions de carte concernent

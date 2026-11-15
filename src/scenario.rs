@@ -109,9 +109,11 @@ impl Scenario {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ScenarioStudy<T> {
+pub struct ScenarioStudy<T, O> {
     pub project_id: Id,
     pub network_version: Id,
     pub scenario: Scenario,
+    pub solver_version: String,
+    pub options: O,
     pub result: T,
 }

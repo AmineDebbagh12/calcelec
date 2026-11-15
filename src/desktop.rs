@@ -5,6 +5,7 @@ use calcelec::load_flow::{self, Options, StudyResult};
 use calcelec::{
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
+    scenario::{InjectionOverride, Scenario, ScenarioKind},
     storage::{self, Store},
 };
 use eframe::egui::{self, Color32, Pos2, Stroke, Vec2};
@@ -20,6 +21,32 @@ fn numeric(ui: &mut egui::Ui, label: &str, value: &mut f64) {
         ui.label(label);
         ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(6));
     });
+}
+fn scenario_template(name: &str, kind: ScenarioKind, load: f64, generation: f64) -> Scenario {
+    Scenario {
+        id: Id::new_v4(),
+        name: name.into(),
+        kind,
+        load_scale: load,
+        generation_scale: generation,
+        injections: BTreeMap::new(),
+    }
+}
+fn default_scenarios() -> Vec<Scenario> {
+    vec![
+        scenario_template(
+            "Consommation maximale",
+            ScenarioKind::MaximumConsumption,
+            1.2,
+            0.0,
+        ),
+        scenario_template(
+            "Production maximale",
+            ScenarioKind::MaximumGeneration,
+            0.3,
+            1.0,
+        ),
+    ]
 }
 fn diagram_northing(object: &calcelec::model::Object) -> f64 {
     let coordinates = object.geometry.coordinates();
@@ -80,6 +107,7 @@ enum CalculationResult {
 struct CalculationTask {
     receiver: mpsc::Receiver<load_flow::Result<CalculationResult>>,
     cancel: Arc<AtomicBool>,
+    scenario: Option<Scenario>,
 }
 
 pub struct Desktop {
@@ -106,6 +134,10 @@ pub struct Desktop {
     use_unbalanced: bool,
     calculation: Option<CalculationTask>,
     simplified_calculation: bool,
+    scenarios: Vec<Scenario>,
+    active_scenario: Option<Id>,
+    result_scenario: Option<Scenario>,
+    scenario_path: String,
     results_view: bool,
     result_path: String,
     history: EditHistory,
@@ -147,6 +179,10 @@ impl Desktop {
             use_unbalanced: false,
             calculation: None,
             simplified_calculation: false,
+            scenarios: default_scenarios(),
+            active_scenario: None,
+            result_scenario: None,
+            scenario_path: "scenario.calcelec.json".into(),
             results_view: false,
             result_path: "resultats.calcelec.json".into(),
             history: EditHistory::default(),
@@ -200,6 +236,9 @@ impl Desktop {
             s.project_id != self.project.id || s.network_version != self.project.head()
         }) {
             self.unbalanced_study = None;
+        }
+        if self.study.is_none() && self.unbalanced_study.is_none() {
+            self.result_scenario = None;
         }
         if let Some(task) = &self.calculation {
             task.cancel.store(true, Ordering::Relaxed);
@@ -500,11 +539,244 @@ impl Desktop {
         }
         ui.separator();
     }
+    fn invalidate_scenario_result(&mut self) {
+        self.study = None;
+        self.unbalanced_study = None;
+        self.result_scenario = None;
+        if let Some(task) = &self.calculation {
+            task.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+    fn scenario_manager(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Scénarios d'étude");
+        let selected_name = self
+            .active_scenario
+            .and_then(|id| self.scenarios.iter().find(|scenario| scenario.id == id))
+            .map(|scenario| scenario.name.as_str())
+            .unwrap_or("Réseau de base");
+        let before_selection = self.active_scenario;
+        egui::ComboBox::from_id_salt("active_scenario")
+            .selected_text(selected_name)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.active_scenario, None, "Réseau de base");
+                for scenario in &self.scenarios {
+                    ui.selectable_value(
+                        &mut self.active_scenario,
+                        Some(scenario.id),
+                        &scenario.name,
+                    );
+                }
+            });
+        if self.active_scenario != before_selection {
+            self.invalidate_scenario_result();
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Nouveau").clicked() {
+                let scenario =
+                    scenario_template("Nouveau scénario", ScenarioKind::Custom, 1.0, 1.0);
+                self.active_scenario = Some(scenario.id);
+                self.scenarios.push(scenario);
+                self.invalidate_scenario_result();
+            }
+            if ui
+                .add_enabled(
+                    self.active_scenario.is_some(),
+                    egui::Button::new("Dupliquer"),
+                )
+                .clicked()
+            {
+                let mut scenario = self
+                    .scenarios
+                    .iter()
+                    .find(|scenario| Some(scenario.id) == self.active_scenario)
+                    .expect("active scenario exists")
+                    .clone();
+                scenario.id = Id::new_v4();
+                scenario.name.push_str(" — copie");
+                self.active_scenario = Some(scenario.id);
+                self.scenarios.push(scenario);
+                self.invalidate_scenario_result();
+            }
+            if ui
+                .add_enabled(
+                    self.active_scenario.is_some(),
+                    egui::Button::new("Supprimer"),
+                )
+                .clicked()
+            {
+                let active = self.active_scenario.take();
+                self.scenarios
+                    .retain(|scenario| Some(scenario.id) != active);
+                self.invalidate_scenario_result();
+            }
+        });
+
+        if let Some(index) = self
+            .active_scenario
+            .and_then(|id| self.scenarios.iter().position(|scenario| scenario.id == id))
+        {
+            let original = self.scenarios[index].clone();
+            let mut edited = original.clone();
+            ui.label("Nom");
+            ui.text_edit_singleline(&mut edited.name);
+            egui::ComboBox::from_id_salt("scenario_kind")
+                .selected_text(match edited.kind {
+                    ScenarioKind::MaximumConsumption => "Consommation maximale",
+                    ScenarioKind::MaximumGeneration => "Production maximale",
+                    ScenarioKind::Custom => "Personnalisé",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut edited.kind,
+                        ScenarioKind::MaximumConsumption,
+                        "Consommation maximale",
+                    );
+                    ui.selectable_value(
+                        &mut edited.kind,
+                        ScenarioKind::MaximumGeneration,
+                        "Production maximale",
+                    );
+                    ui.selectable_value(&mut edited.kind, ScenarioKind::Custom, "Personnalisé");
+                });
+            numeric(ui, "Coefficient charges", &mut edited.load_scale);
+            numeric(ui, "Coefficient productions", &mut edited.generation_scale);
+            ui.small("Les exceptions ci-dessous remplacent les valeurs après application des coefficients globaux.");
+
+            ui.collapsing(
+                format!("Exceptions par injection ({})", edited.injections.len()),
+                |ui| {
+                    let mut injections: Vec<_> = self
+                        .network
+                        .objects
+                        .values()
+                        .filter(|object| {
+                            matches!(
+                                object.equipment,
+                                Equipment::Load { .. } | Equipment::Generator { .. }
+                            )
+                        })
+                        .map(|object| {
+                            let (p, q) = object.power().unwrap();
+                            (object.id, object.name.clone(), object.in_service, p, q)
+                        })
+                        .collect();
+                    injections.sort_by(|left, right| left.1.cmp(&right.1));
+                    for (id, name, service, p, q) in injections {
+                        let mut enabled = edited.injections.contains_key(&id);
+                        if ui.checkbox(&mut enabled, name).changed() {
+                            if enabled {
+                                edited.injections.insert(
+                                    id,
+                                    InjectionOverride {
+                                        in_service: Some(service),
+                                        p_w: Some(p),
+                                        q_var: Some(q),
+                                    },
+                                );
+                            } else {
+                                edited.injections.remove(&id);
+                            }
+                        }
+                        if let Some(values) = edited.injections.get_mut(&id) {
+                            ui.indent(id, |ui| {
+                                let mut in_service = values.in_service.unwrap_or(service);
+                                ui.checkbox(&mut in_service, "En service dans ce scénario");
+                                values.in_service = Some(in_service);
+                                let mut p_kw = values.p_w.unwrap_or(p) / 1000.0;
+                                let mut q_kvar = values.q_var.unwrap_or(q) / 1000.0;
+                                numeric(ui, "P (kW)", &mut p_kw);
+                                numeric(ui, "Q (kvar)", &mut q_kvar);
+                                values.p_w = Some(p_kw * 1000.0);
+                                values.q_var = Some(q_kvar * 1000.0);
+                            });
+                        }
+                    }
+                },
+            );
+            match edited.validate(&self.network) {
+                Ok(()) => ui.small("Scénario valide pour le réseau courant."),
+                Err(error) => ui.colored_label(Color32::LIGHT_RED, error.to_string()),
+            };
+            if edited != original {
+                self.scenarios[index] = edited;
+                self.invalidate_scenario_result();
+            }
+        } else {
+            ui.small("Le réseau de base utilise directement les puissances enregistrées dans les ouvrages.");
+        }
+
+        ui.label("Fichier scénario");
+        ui.text_edit_singleline(&mut self.scenario_path);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    self.active_scenario.is_some(),
+                    egui::Button::new("Exporter"),
+                )
+                .clicked()
+            {
+                let result = (|| -> Result<String> {
+                    let scenario = self
+                        .scenarios
+                        .iter()
+                        .find(|scenario| Some(scenario.id) == self.active_scenario)
+                        .expect("active scenario exists");
+                    scenario.validate(&self.network)?;
+                    storage::export_new(&self.scenario_path, &serde_json::to_string(scenario)?)?;
+                    Ok("Scénario exporté.".into())
+                })();
+                self.report(result);
+            }
+            if ui.button("Importer").clicked() {
+                let result = (|| -> Result<String> {
+                    let scenario: Scenario =
+                        serde_json::from_str(&std::fs::read_to_string(&self.scenario_path)?)?;
+                    scenario.validate(&self.network)?;
+                    if let Some(existing) = self
+                        .scenarios
+                        .iter_mut()
+                        .find(|existing| existing.id == scenario.id)
+                    {
+                        *existing = scenario.clone();
+                    } else {
+                        self.scenarios.push(scenario.clone());
+                    }
+                    self.active_scenario = Some(scenario.id);
+                    self.invalidate_scenario_result();
+                    Ok("Scénario importé et sélectionné.".into())
+                })();
+                self.report(result);
+            }
+        });
+        ui.separator();
+    }
     fn start_calculation(&mut self) {
         if self.calculation.is_some() {
             return;
         }
         let project = self.project.clone();
+        let scenario = self
+            .active_scenario
+            .and_then(|id| self.scenarios.iter().find(|scenario| scenario.id == id))
+            .cloned();
+        let base_network = match project.network() {
+            Ok(network) => network,
+            Err(error) => {
+                self.report(Err(error));
+                return;
+            }
+        };
+        let network = match &scenario {
+            Some(scenario) => match scenario.apply(&base_network) {
+                Ok(network) => network,
+                Err(error) => {
+                    self.report(Err(error));
+                    return;
+                }
+            },
+            None => base_network,
+        };
         let use_unbalanced = self.use_unbalanced;
         let options = if self.simplified_calculation {
             Options::simplified()
@@ -517,19 +789,47 @@ impl Desktop {
         self.study = None;
         self.unbalanced_study = None;
         self.error = false;
-        self.status = "Calcul en cours sur la version enregistrée en mémoire ; les champs non validés sont exclus.".into();
-        self.calculation = Some(CalculationTask { receiver, cancel });
+        self.result_scenario = None;
+        self.status = match &scenario {
+            Some(scenario) => format!(
+                "Calcul en cours avec le scénario « {} » ; les champs non validés sont exclus.",
+                scenario.name
+            ),
+            None => {
+                "Calcul en cours sur le réseau de base ; les champs non validés sont exclus.".into()
+            }
+        };
+        self.calculation = Some(CalculationTask {
+            receiver,
+            cancel,
+            scenario: scenario.clone(),
+        });
         std::thread::spawn(move || {
             let result = if use_unbalanced {
-                calcelec::unbalanced::study(
-                    &project,
+                calcelec::unbalanced::solve_cancellable(
+                    &network,
                     &calcelec::unbalanced::Options::default(),
                     &worker_cancel,
                 )
-                .map(CalculationResult::Unbalanced)
+                .map(|result| {
+                    CalculationResult::Unbalanced(calcelec::unbalanced::StudyResult {
+                        project_id: project.id,
+                        network_version: project.head(),
+                        solver_version: calcelec::unbalanced::SOLVER_VERSION.into(),
+                        options: calcelec::unbalanced::Options::default(),
+                        result,
+                    })
+                })
             } else {
-                load_flow::study(&project, &options, &worker_cancel)
-                    .map(CalculationResult::Balanced)
+                load_flow::solve_cancellable(&network, &options, &worker_cancel).map(|result| {
+                    CalculationResult::Balanced(StudyResult {
+                        project_id: project.id,
+                        network_version: project.head(),
+                        solver_version: load_flow::SOLVER_VERSION.into(),
+                        options,
+                        result,
+                    })
+                })
             };
             let _ = sender.send(result);
         });
@@ -538,8 +838,12 @@ impl Desktop {
         let Some(task) = &self.calculation else {
             return;
         };
-        let (result, was_cancelled) = match task.receiver.try_recv() {
-            Ok(result) => (result, task.cancel.load(Ordering::Relaxed)),
+        let (result, was_cancelled, scenario) = match task.receiver.try_recv() {
+            Ok(result) => (
+                result,
+                task.cancel.load(Ordering::Relaxed),
+                task.scenario.clone(),
+            ),
             Err(mpsc::TryRecvError::Empty) => return,
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.calculation = None;
@@ -567,6 +871,7 @@ impl Desktop {
                 );
                 self.error = false;
                 self.results_view = true;
+                self.result_scenario = scenario;
                 self.study = Some(study);
             }
             Ok(CalculationResult::Unbalanced(study))
@@ -581,6 +886,7 @@ impl Desktop {
                 );
                 self.error = false;
                 self.results_view = true;
+                self.result_scenario = scenario;
                 self.unbalanced_study = Some(study);
             }
             Ok(_) => {
@@ -607,8 +913,17 @@ impl Desktop {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
             }
         });
+        ui.small(
+            match self
+                .active_scenario
+                .and_then(|id| self.scenarios.iter().find(|scenario| scenario.id == id))
+            {
+                Some(scenario) => format!("Scénario actif : {}", scenario.name),
+                None => "Scénario actif : réseau de base".into(),
+            },
+        );
         if self.use_unbalanced {
-            ui.small("ABC/ABCN radial : lignes quatre fils, zones de terre, neutre source impédant et transformateurs Dyn/Yzn HTA/BT. Exemple complet : reference-rural-unbalanced.json.");
+            ui.small("ABC/ABCN radial ou faiblement maillé : lignes quatre fils, zones de terre, neutre source impédant et transformateurs Dyn/Yzn HTA/BT.");
         } else if self.simplified_calculation {
             ui.small("Hypothèses : équivalents équilibrés des charges monophasées ; transformateurs purement réactifs, rapport nominal, sans déphasage. Aucun calcul du neutre.");
         }
@@ -639,6 +954,10 @@ impl Desktop {
                 "{} · réseau {} · tolérance {:.1e} pu",
                 study.solver_version, study.network_version, study.options.tolerance_pu
             ));
+            ui.label(match &self.result_scenario {
+                Some(scenario) => format!("Scénario : {} ({})", scenario.name, scenario.id),
+                None => "Scénario : réseau de base".into(),
+            });
             for assumption in &r.assumptions {
                 ui.label(assumption);
             }
@@ -646,9 +965,19 @@ impl Desktop {
         ui.horizontal(|ui| {
             ui.text_edit_singleline(&mut self.result_path);
             if ui.button("Exporter les résultats JSON").clicked() {
-                let result = serde_json::to_string(study)
-                    .map_err(Into::into)
-                    .and_then(|json| storage::export_new(&self.result_path, &json));
+                let result = match &self.result_scenario {
+                    Some(scenario) => serde_json::to_string(&calcelec::scenario::ScenarioStudy {
+                        project_id: study.project_id,
+                        network_version: study.network_version,
+                        scenario: scenario.clone(),
+                        solver_version: study.solver_version.clone(),
+                        options: &study.options,
+                        result: &study.result,
+                    }),
+                    None => serde_json::to_string(study),
+                }
+                .map_err(Into::into)
+                .and_then(|json| storage::export_new(&self.result_path, &json));
                 self.error = result.is_err();
                 self.status = match result {
                     Ok(()) => {
@@ -818,6 +1147,10 @@ impl Desktop {
         ));
         ui.collapsing("Hypothèses et traçabilité du résultat", |ui| {
             ui.label(format!("Version réseau : {}", study.network_version));
+            ui.label(match &self.result_scenario {
+                Some(scenario) => format!("Scénario : {} ({})", scenario.name, scenario.id),
+                None => "Scénario : réseau de base".into(),
+            });
             ui.label(format!(
                 "Moteur : {} · tolérance {:.1e} pu",
                 study.solver_version, study.options.tolerance_pu
@@ -829,9 +1162,19 @@ impl Desktop {
         ui.horizontal(|ui| {
             ui.text_edit_singleline(&mut self.result_path);
             if ui.button("Exporter les résultats JSON").clicked() {
-                let result = serde_json::to_string(study)
-                    .map_err(Into::into)
-                    .and_then(|json| storage::export_new(&self.result_path, &json));
+                let result = match &self.result_scenario {
+                    Some(scenario) => serde_json::to_string(&calcelec::scenario::ScenarioStudy {
+                        project_id: study.project_id,
+                        network_version: study.network_version,
+                        scenario: scenario.clone(),
+                        solver_version: study.solver_version.clone(),
+                        options: &study.options,
+                        result: &study.result,
+                    }),
+                    None => serde_json::to_string(study),
+                }
+                .map_err(Into::into)
+                .and_then(|json| storage::export_new(&self.result_path, &json));
                 self.error = result.is_err();
                 self.status = match result {
                     Ok(()) => "Résultats exportés avec version, options et hypothèses.".into(),
@@ -940,6 +1283,9 @@ impl Desktop {
                 let result = storage::read_project(&self.file_path).and_then(|project| {
                     self.map.reset();
                     self.project = project;
+                    self.scenarios = default_scenarios();
+                    self.active_scenario = None;
+                    self.result_scenario = None;
                     self.selected = None;
                     self.refresh()?;
                     Ok("Projet ouvert.".into())
@@ -1026,6 +1372,9 @@ impl Desktop {
                 .and_then(|project| {
                     self.map.reset();
                     self.project = project;
+                    self.scenarios = default_scenarios();
+                    self.active_scenario = None;
+                    self.result_scenario = None;
                     self.selected = None;
                     self.refresh()?;
                     Ok("Projet chargé depuis SQLite.".into())
@@ -1474,7 +1823,7 @@ impl Desktop {
                 ui.label(format!("{} objets · {} versions enregistrées en mémoire",self.network.objects.len(),self.project.changes.len()+1));
                 ui.small(format!("Version {}",self.project.head()));
             });
-            ui.colored_label(Color32::from_rgb(230,180,75),"Prototype — calculs AC équilibré radial et BT ABCN disponibles ; courts-circuits à venir. Données synthétiques.");
+            ui.colored_label(Color32::from_rgb(230,180,75),"Prototype — scénarios et calculs AC disponibles ; moteur IccBmin/3I0 accessible en ligne de commande. Données synthétiques.");
             self.calculation_controls(ui);
             let missing=calcelec::electrical::missing_data(&self.network);
             ui.collapsing(format!("Données détaillées : {} informations à compléter",missing.len()),|ui| {
@@ -1498,6 +1847,7 @@ impl Desktop {
             .default_size(335.0)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.scenario_manager(ui);
                     self.toolbox(ui);
                     self.inspector(ui);
                     ui.separator();
@@ -1694,6 +2044,7 @@ mod tests {
         app.calculation = Some(CalculationTask {
             receiver,
             cancel: Arc::new(AtomicBool::new(cancelled)),
+            scenario: None,
         });
         app.poll_calculation();
     }
@@ -1811,6 +2162,7 @@ mod tests {
             app.calculation = Some(CalculationTask {
                 receiver,
                 cancel: Arc::new(AtomicBool::new(false)),
+                scenario: None,
             });
             app.poll_calculation();
         };
@@ -1837,6 +2189,37 @@ mod tests {
         assert!(app.unbalanced_study.is_none());
         deliver(&mut app, report);
         assert!(app.unbalanced_study.is_none());
+    }
+    #[test]
+    fn active_scenario_is_applied_by_the_desktop_worker_and_traced_with_the_result() {
+        let mut app = Desktop::new();
+        app.network = calcelec::reference_cases::rural_unbalanced();
+        app.project = Project::new(app.network.clone()).unwrap();
+        app.use_unbalanced = true;
+        let scenario = scenario_template(
+            "Pointe de consommation",
+            ScenarioKind::MaximumConsumption,
+            1.2,
+            0.0,
+        );
+        app.active_scenario = Some(scenario.id);
+        app.scenarios = vec![scenario.clone()];
+        app.start_calculation();
+        for _ in 0..10_000 {
+            app.poll_calculation();
+            if app.calculation.is_none() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(app.calculation.is_none());
+        let study = app.unbalanced_study.as_ref().unwrap();
+        assert_eq!(study.result.net_demand_p_w, 252_000.0);
+        assert_eq!(app.result_scenario, Some(scenario));
+
+        app.invalidate_scenario_result();
+        assert!(app.unbalanced_study.is_none());
+        assert!(app.result_scenario.is_none());
     }
     #[test]
     fn grounding_results_render_with_separate_losses_and_are_invalidated_after_edit() {

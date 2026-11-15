@@ -43,6 +43,22 @@ second 45 kW. Le résultat exporte l'intégralité du scénario, l'identifiant d
 projet et la version exacte du réseau.
 
 Le même format fonctionne avec le moteur équilibré via `--scenario-load-flow`.
-Les prochains ajouts seront l'édition dans l'interface, la persistance d'une
-collection de scénarios, les états de prises/interrupteurs par scénario et la
-comparaison graphique de plusieurs résultats.
+
+## Interface graphique
+
+Le panneau **Scénarios d'étude** propose le réseau de base et la collection de
+la session. Il permet de créer, dupliquer et supprimer un scénario, de choisir
+son type, de modifier ses coefficients et d'activer une exception pour chaque
+charge ou production. Les exceptions éditent P, Q et l'état en service sans
+modifier l'ouvrage de référence.
+
+Le scénario sélectionné est appliqué par le worker de calcul équilibré ou
+déséquilibré. Une modification du scénario annule le calcul en cours et invalide
+le résultat précédent. La traçabilité affichée et le JSON exporté contiennent le
+scénario complet, les options et la version du moteur. Les fichiers scénario
+peuvent être importés et exportés depuis ce même panneau.
+
+La collection reste locale à la session ; chaque scénario à conserver doit être
+exporté avant de quitter. Les prochains ajouts seront sa persistance groupée,
+les états de prises/interrupteurs par scénario et la comparaison graphique de
+plusieurs résultats.
