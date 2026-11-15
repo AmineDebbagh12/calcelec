@@ -2,7 +2,7 @@
 use crate::{
     electrical::*,
     geometry::{Coordinate, CoordinateReference, Geometry},
-    model::{Equipment, Network, Object, Phase},
+    model::{Equipment, Network, Object, Phase, rural_example},
 };
 use std::collections::BTreeMap;
 fn object(
@@ -451,6 +451,136 @@ pub fn source_grounded_bt() -> Network {
             }
             _ => {}
         }
+    }
+    n
+}
+
+fn primitive_line(
+    conductors: Vec<Conductor>,
+    phase: Impedance,
+    neutral: Option<Impedance>,
+    mutual: Impedance,
+) -> ElectricalData {
+    let size = conductors.len();
+    let mut matrix = vec![vec![mutual; size]; size];
+    for (index, row) in matrix.iter_mut().enumerate() {
+        row[index] = if conductors[index] == Conductor::N {
+            neutral.expect("neutral impedance for an ABCN primitive")
+        } else {
+            phase
+        };
+    }
+    ElectricalData::Line(LineData {
+        conductors,
+        series_ohm_per_km: matrix,
+        shunt_siemens_per_km: None,
+    })
+}
+
+/// Full synthetic rural HTA/BT feeder using the geographic V1 demonstration network.
+pub fn rural_unbalanced() -> Network {
+    let mut n = rural_example();
+    n.name = "Référence synthétique — réseau rural HTA/BT déséquilibré".into();
+    let bus_voltages: BTreeMap<_, _> = n
+        .objects
+        .values()
+        .filter_map(|object| match object.equipment {
+            Equipment::Bus { voltage_v } => Some((object.id, voltage_v)),
+            _ => None,
+        })
+        .collect();
+    for object in n.objects.values_mut() {
+        let electrical = match &object.equipment {
+            Equipment::Bus { voltage_v } if *voltage_v > 1000.0 => ElectricalData::Bus(BusData {
+                conductors: vec![Conductor::A, Conductor::B, Conductor::C],
+                neutral_grounding: Grounding::NotApplicable,
+            }),
+            Equipment::Bus { .. } => ElectricalData::Bus(BusData {
+                conductors: vec![Conductor::A, Conductor::B, Conductor::C, Conductor::N],
+                neutral_grounding: if object.name == "Extrémité départ BT" {
+                    Grounding::Impedance {
+                        ohm: Impedance { r: 1.0, x: 0.0 },
+                    }
+                } else {
+                    Grounding::Impedance {
+                        ohm: Impedance::ZERO,
+                    }
+                },
+            }),
+            Equipment::Source { .. } => ElectricalData::Source(SourceData {
+                positive_sequence_ohm: Some(Impedance { r: 0.5, x: 2.0 }),
+                negative_sequence_ohm: Some(Impedance { r: 0.5, x: 2.0 }),
+                zero_sequence_ohm: Some(Impedance { r: 1.0, x: 4.0 }),
+                neutral_grounding: Grounding::NotApplicable,
+            }),
+            Equipment::Line { from, .. } if bus_voltages[from] > 1000.0 => primitive_line(
+                vec![Conductor::A, Conductor::B, Conductor::C],
+                Impedance { r: 0.4, x: 0.35 },
+                None,
+                Impedance { r: 0.04, x: 0.08 },
+            ),
+            Equipment::Line { .. } => primitive_line(
+                vec![Conductor::A, Conductor::B, Conductor::C, Conductor::N],
+                Impedance { r: 0.32, x: 0.08 },
+                Some(Impedance { r: 0.64, x: 0.08 }),
+                Impedance { r: 0.02, x: 0.03 },
+            ),
+            Equipment::Transformer { .. } => ElectricalData::Transformer(TransformerData {
+                from: Winding {
+                    connection: WindingConnection::Delta,
+                    rated_voltage_ll_v: 20000.0,
+                    neutral_terminal: false,
+                    grounding: Grounding::NotApplicable,
+                },
+                to: Winding {
+                    connection: WindingConnection::Star,
+                    rated_voltage_ll_v: 400.0,
+                    neutral_terminal: true,
+                    grounding: Grounding::Impedance {
+                        ohm: Impedance::ZERO,
+                    },
+                },
+                clock: 11,
+                copper_loss_w: 2500.0,
+                iron_loss_w: Some(0.0),
+                no_load_current_percent: Some(0.0),
+                tap: Some(TapChanger {
+                    side: Side::From,
+                    min_position: -2,
+                    max_position: 2,
+                    neutral_position: 0,
+                    position: 0,
+                    step_percent: 2.5,
+                }),
+                zero_sequence_ohm_referred_from: Some(Impedance { r: 16.0, x: 60.0 }),
+            }),
+            Equipment::Load { phase, .. } | Equipment::Generator { phase, .. } => {
+                let connection = match phase {
+                    Phase::Abc => InjectionConnection::ThreePhaseStar { neutral: true },
+                    Phase::A => InjectionConnection::PhaseNeutral {
+                        phase: Conductor::A,
+                    },
+                    Phase::B => InjectionConnection::PhaseNeutral {
+                        phase: Conductor::B,
+                    },
+                    Phase::C => InjectionConnection::PhaseNeutral {
+                        phase: Conductor::C,
+                    },
+                };
+                ElectricalData::Injection(InjectionData {
+                    connection,
+                    fault_contribution: if matches!(object.equipment, Equipment::Generator { .. }) {
+                        FaultContribution::CurrentLimited {
+                            max_current_a: 30.0,
+                        }
+                    } else {
+                        FaultContribution::None
+                    },
+                })
+            }
+            Equipment::Switch { .. } => unreachable!("rural reference has no switch"),
+        };
+        object.electrical = Some(electrical);
     }
     n
 }

@@ -357,6 +357,32 @@ Le calcul initial converge en 5 itérations. Le retour à la source vaut environ
 487,313 W dans les lignes et 24,182 W dans l'ensemble des terres, dont 7,483 W
 à la source. L'erreur de bilan reste inférieure à 0,001 VA.
 
+## Exemple rural HTA/BT complet
+
+Ouvrir `examples/reference-rural-unbalanced.json` pour calculer la géographie
+de démonstration complète avec trois tronçons HTA de 1,5 km, trois transformateurs
+Dyn11 de 250 kVA et trois zones BT. Le premier poste alimente un câble ABCN de
+200 m, trois charges monophasées, un générateur photovoltaïque triphasé et une
+terre terminale de 1 ohm. Les deux autres postes alimentent chacun une charge
+triphasée agrégée.
+
+```sh
+cargo run -- --unbalanced-load-flow examples/reference-rural-unbalanced.json
+cargo run -- --reference-case rural-unbalanced nouveau-projet.json
+```
+
+Le calcul initial converge en 5 itérations pour une demande nette de 192 kW et
+46 kvar. Les pertes sont proches de 212,436 W dans les lignes, 698,664 W dans
+les transformateurs et 2,788 W dans les terres, soit 913,888 W au total. La
+tension phase-neutre BT minimale reste supérieure à 0,98 pu et le courant de la
+terre terminale vaut environ 1,670 A. L'erreur de bilan est inférieure à 0,001 VA.
+
+Le test associé vérifie les huit bus, les sept branches, les trois frontières
+galvaniques, l'absence de courant homopolaire sur les lignes HTA, la fermeture
+locale des courants de terre et la somme détaillée des pertes. Ce cas prépare
+la comparaison avec un moteur indépendant ; il ne constitue pas encore cette
+validation externe.
+
 Les tests supplémentaires comparent une charge monophasée avec retour parallèle
 neutre/terre à sa solution analytique complexe, puis deux prises de terre à leur
 équivalent parallèle résistif. Ils vérifient aussi le neutre fixé idéalement,

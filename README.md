@@ -106,7 +106,7 @@ version. Les structures préremplies sont provisoires et doivent être vérifié
 Les données inconnues des anciens projets restent absentes ; l'application les
 signale dans **Données détaillées** et la commande `--check`.
 
-Six cas synthétiques sont notamment fournis :
+Sept cas synthétiques sont notamment fournis :
 [ligne quatre conducteurs](examples/reference-four-wire.json) et
 [transformateur équilibré avec pertes cuivre](examples/reference-transformer.json),
 ainsi qu'un [transformateur Dyn11 déséquilibré](examples/reference-dyn-transformer.json).
@@ -116,6 +116,8 @@ Le cas [Dyn11 avec câble et terre BT aval](examples/reference-dyn-grounded.json
 vérifie en plus la séparation des zones galvaniques de terre.
 Le cas [BT avec terre source impédante](examples/reference-source-grounded-bt.json)
 vérifie le potentiel et les pertes de l'ancrage source.
+Le [réseau rural HTA/BT détaillé](examples/reference-rural-unbalanced.json)
+réunit trois postes, plusieurs zones de terre, des charges déséquilibrées et du PV.
 Ils se calculent sans les options de simplification. Le moteur exploite leurs
 matrices et résistances ; le moteur déséquilibré applique aussi le rapport, la
 prise fixe, le déphasage horaire et l'impédance homopolaire des cas Dyn/Yzn pris en charge.
@@ -169,9 +171,10 @@ ABC, secondaire ABCN directement mis à la terre, excitation nulle et impédance
 homopolaire déclarée. Les prises de terre supplémentaires derrière ce
 transformateur sont résolues dans une zone galvanique ancrée à son neutre BT,
 sans faire remonter le courant homopolaire sur les conducteurs HTA. Les autres couplages,
-les shunts, phases manquantes et points étoile
-flottants restent refusés. L'exemple rural complet reste donc à calculer avec
-le moteur équilibré simplifié ; il ne doit pas être converti implicitement.
+les shunts, phases manquantes et points étoile flottants restent refusés.
+Le cas `examples/reference-rural-unbalanced.json` fournit désormais le parcours
+rural complet avec des données détaillées explicites ; l'exemple historique
+créé au démarrage conserve volontairement son parcours équilibré simplifié.
 Un deuxième exemple, `examples/reference-grounded-bt.json`, ajoute des terres
 intermédiaire et terminale. Il conserve les mêmes commandes et le même mode de
 calcul ; les pertes totales incluent désormais lignes et prises de terre.
@@ -219,6 +222,7 @@ cargo run -- --unbalanced-load-flow examples/reference-dyn-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-yzn-transformer.json
 cargo run -- --unbalanced-load-flow examples/reference-dyn-grounded.json
 cargo run -- --unbalanced-load-flow examples/reference-source-grounded-bt.json
+cargo run -- --unbalanced-load-flow examples/reference-rural-unbalanced.json
 ```
 
 Utiliser un chemin adapté sous Windows. Le premier appel crée un nouveau projet
@@ -247,8 +251,8 @@ attendues, l'annulation et l'invalidation des résultats après modification.
 
 - Exploiter les phases, le neutre, les couplages, prises et mises à la terre dans
   les moteurs suivants ; compléter les modèles homopolaires et de convertisseurs.
-- Valider le calcul déséquilibré sur un cas rural HTA/BT indépendant, puis
-  couvrir les réseaux maillés, les modèles de sol détaillés et les courts-circuits.
+- Comparer le cas rural HTA/BT détaillé à un moteur indépendant, puis couvrir
+  les réseaux maillés, les modèles de sol détaillés et les courts-circuits.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents

@@ -418,7 +418,7 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | A — Spécification numérique | Modèles, conventions et cas de référence | Socle établi ; à compléter pour chaque nouveau calcul avec résultats attendus et tolérances |
 | A bis — Contrat de données | Objets, instantanés, versions et lots documentés | Socle opérationnel ; compacité et montée en charge encore à mesurer |
 | B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; cas maillés et validation indépendante restant à couvrir |
-| C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial, terres multi-zones, neutre source impédant et groupes Dyn/Yzn disponibles ; cas rural indépendant et mailles à compléter |
+| C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial, terres multi-zones, neutre source impédant, groupes Dyn/Yzn et cas rural détaillé disponibles ; comparaison indépendante et mailles à compléter |
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Défauts supportés validés, cas min/max et contributions vérifiés |
 | E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Parcours complet réalisé sur Windows et Linux sur un réseau HTA/BT de référence |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
@@ -427,8 +427,8 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 
 ### Ordre proposé des prochains jalons
 
-1. **Achever C — modèle déséquilibré de distribution** : cas rural HTA/BT
-   complet avec comparaison indépendante.
+1. **Achever C — validation indépendante** : rejouer le cas rural HTA/BT
+   complet dans un moteur de référence et documenter les écarts et tolérances.
 2. **Achever B/C — topologies d'exploitation** : calcul des réseaux maillés dans
    le domaine retenu, îlots et configurations avec points de coupure, sans
    confondre une maille dessinée et une maille effectivement fermée.

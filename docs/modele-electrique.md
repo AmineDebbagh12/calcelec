@@ -161,7 +161,7 @@ aux matrices et aux enroulements restent à améliorer.
 
 ## Cas de référence et validation
 
-Six projets autonomes ciblent les modèles détaillés dans `examples/` :
+Sept projets autonomes ciblent les modèles détaillés dans `examples/` :
 
 | Cas | Modèle et contrôle analytique |
 | --- | --- |
@@ -171,6 +171,7 @@ Six projets autonomes ciblent les modèles détaillés dans `examples/` :
 | `reference-yzn-transformer.json` | Transformateur Yzn11 20 kV/400 V avec primaire étoile isolé et secondaire zigzag mis à la terre ; courant homopolaire BT local, blocage sur les conducteurs HTA, déphasage et pertes vérifiés |
 | `reference-dyn-grounded.json` | Même Dyn11 suivi d'un câble ABCN de 50 m et d'une prise de terre terminale ; courant d'électrode, compensation au point étoile, tensions et pertes vérifiés dans la zone BT |
 | `reference-source-grounded-bt.json` | Départ BT déséquilibré avec deux terres aval et résistance de terre source de 0,2 ohm ; déplacement du neutre source, partage des courants et pertes vérifiés |
+| `reference-rural-unbalanced.json` | Trois tronçons HTA, trois Dyn11 et trois zones BT, dont un départ ABCN détaillé avec charges monophasées, PV et terre terminale ; connectivité, blocage homopolaire, pertes et bilans vérifiés |
 
 Ces valeurs sont synthétiques et ne décrivent pas des ouvrages Enedis types.
 Les tests vérifient tensions, angles, courants et pertes face aux solutions
@@ -179,8 +180,8 @@ couvrent aussi les permutations d'ordre de conducteurs, les données invalides,
 les migrations et les échanges/annulations/stockages des modifications détaillées.
 Le moteur déséquilibré exploite les matrices ABCN et les modèles Dyn/Yzn HTA/BT
 sur des départs radiaux, avec neutre BT explicitement représenté ; voir le
-[jalon déséquilibré](calcul-desequilibre.md). Son extension aux modèles de sol
-détaillés, la comparaison à des outils indépendants et la validation
+[jalon déséquilibré](calcul-desequilibre.md). Un cas rural complet est désormais
+calculé ; son extension aux modèles de sol détaillés, la comparaison à des outils indépendants et la validation
 normative des calculs de courts-circuits restent à réaliser.
 
 Références de formulation consultées : [matrices de ligne OpenDSS / EPRI](https://opendss.epri.com/Properties14.html),
