@@ -1,8 +1,10 @@
 use calcelec::{
     model::{self, Equipment, Error, Object},
     project::{Operation, Project},
+    scenario::{Scenario, ScenarioKind},
     storage::{self, Store},
 };
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 fn project() -> Project {
@@ -228,6 +230,54 @@ fn sqlite_preserves_history_and_rejects_stale_and_divergent_writers() {
     assert_eq!(db.load(id.parse().unwrap()).unwrap().changes.len(), 1);
     drop(connection);
     drop(db);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn sqlite_persists_a_version_bound_scenario_collection_with_the_project() {
+    let path = std::env::temp_dir().join(format!("calcelec-scenarios-{}.sqlite", Uuid::new_v4()));
+    let project = project();
+    let scenarios = vec![Scenario {
+        id: Uuid::new_v4(),
+        name: "Production maximale".into(),
+        kind: ScenarioKind::MaximumGeneration,
+        load_scale: 0.3,
+        generation_scale: 1.0,
+        injections: BTreeMap::new(),
+    }];
+    {
+        let mut store = Store::open(&path).unwrap();
+        store.save_workspace(&project, &scenarios).unwrap();
+        let loaded = store.load(project.id).unwrap();
+        assert_eq!(store.load_scenarios(&loaded).unwrap(), scenarios);
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn invalid_scenario_collection_rolls_back_the_atomic_workspace_save() {
+    let path = std::env::temp_dir().join(format!(
+        "calcelec-invalid-scenarios-{}.sqlite",
+        Uuid::new_v4()
+    ));
+    let project = project();
+    let scenario = Scenario {
+        id: Uuid::new_v4(),
+        name: "Dupliqué".into(),
+        kind: ScenarioKind::Custom,
+        load_scale: 1.0,
+        generation_scale: 1.0,
+        injections: BTreeMap::new(),
+    };
+    {
+        let mut store = Store::open(&path).unwrap();
+        assert!(
+            store
+                .save_workspace(&project, &[scenario.clone(), scenario])
+                .is_err()
+        );
+        assert!(store.load(project.id).is_err());
+    }
     std::fs::remove_file(path).unwrap();
 }
 

@@ -67,6 +67,9 @@ dupliqué, supprimé, importé ou exporté. Ses coefficients globaux sont compl�
 par des exceptions P/Q et en service par injection. Le calcul utilise le scénario
 sélectionné et l'export de résultat conserve son contenu, la version du réseau,
 les options et la version du moteur.
+L'enregistrement SQLite conserve atomiquement la collection avec le réseau et
+son historique. Toute la collection peut aussi être transférée dans un fichier
+JSON lié à l'identifiant du projet et à sa version exacte.
 
 ## Toolbox géographique
 

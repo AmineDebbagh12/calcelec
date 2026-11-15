@@ -5,7 +5,7 @@ use calcelec::load_flow::{self, Options, StudyResult};
 use calcelec::{
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
-    scenario::{InjectionOverride, Scenario, ScenarioKind},
+    scenario::{InjectionOverride, Scenario, ScenarioCollection, ScenarioKind},
     storage::{self, Store},
 };
 use eframe::egui::{self, Color32, Pos2, Stroke, Vec2};
@@ -138,6 +138,7 @@ pub struct Desktop {
     active_scenario: Option<Id>,
     result_scenario: Option<Scenario>,
     scenario_path: String,
+    scenario_collection_path: String,
     results_view: bool,
     result_path: String,
     history: EditHistory,
@@ -183,6 +184,7 @@ impl Desktop {
             active_scenario: None,
             result_scenario: None,
             scenario_path: "scenario.calcelec.json".into(),
+            scenario_collection_path: "scenarios.calcelec.json".into(),
             results_view: false,
             result_path: "resultats.calcelec.json".into(),
             history: EditHistory::default(),
@@ -745,6 +747,33 @@ impl Desktop {
                     self.active_scenario = Some(scenario.id);
                     self.invalidate_scenario_result();
                     Ok("Scénario importé et sélectionné.".into())
+                })();
+                self.report(result);
+            }
+        });
+        ui.label("Collection liée à cette version du projet");
+        ui.text_edit_singleline(&mut self.scenario_collection_path);
+        ui.horizontal(|ui| {
+            if ui.button("Exporter la collection").clicked() {
+                let result = ScenarioCollection::new(&self.project, self.scenarios.clone())
+                    .and_then(|collection| collection.to_json(&self.project))
+                    .and_then(|json| storage::export_new(&self.scenario_collection_path, &json))
+                    .map(|_| "Collection de scénarios exportée.".into());
+                self.report(result);
+            }
+            if ui.button("Importer la collection").clicked() {
+                let result = (|| -> Result<String> {
+                    let json = std::fs::read_to_string(&self.scenario_collection_path)?;
+                    let collection = ScenarioCollection::from_json(&self.project, &json)?;
+                    self.scenarios = collection.scenarios;
+                    if self
+                        .active_scenario
+                        .is_some_and(|id| !self.scenarios.iter().any(|scenario| scenario.id == id))
+                    {
+                        self.active_scenario = None;
+                    }
+                    self.invalidate_scenario_result();
+                    Ok("Collection de scénarios importée.".into())
                 })();
                 self.report(result);
             }
@@ -1332,18 +1361,25 @@ impl Desktop {
         ui.horizontal(|ui| {
             if ui.button("Enregistrer en base").clicked() {
                 let result = Store::open(&self.database_path)
-                    .and_then(|mut db| db.save(&self.project))
-                    .map(|_| "Réseau et historique enregistrés en base.".into());
+                    .and_then(|mut db| db.save_workspace(&self.project, &self.scenarios))
+                    .map(|_| "Réseau, historique et scénarios enregistrés en base.".into());
                 self.report(result);
             }
             if ui.button("Relire ce projet").clicked() {
                 let result = Store::open(&self.database_path)
-                    .and_then(|db| db.load(self.project.id))
-                    .and_then(|project| {
+                    .and_then(|db| {
+                        let project = db.load(self.project.id)?;
+                        let scenarios = db.load_scenarios(&project)?;
+                        Ok((project, scenarios))
+                    })
+                    .and_then(|(project, scenarios)| {
                         self.map.reset();
                         self.project = project;
+                        self.scenarios = scenarios;
+                        self.active_scenario = None;
+                        self.result_scenario = None;
                         self.refresh()?;
-                        Ok("Projet relu depuis SQLite.".into())
+                        Ok("Projet et scénarios relus depuis SQLite.".into())
                     });
                 self.report(result);
             }
@@ -1368,16 +1404,20 @@ impl Desktop {
         }
         if let Some(id) = requested {
             let result = Store::open(&self.database_path)
-                .and_then(|db| db.load(id))
-                .and_then(|project| {
+                .and_then(|db| {
+                    let project = db.load(id)?;
+                    let scenarios = db.load_scenarios(&project)?;
+                    Ok((project, scenarios))
+                })
+                .and_then(|(project, scenarios)| {
                     self.map.reset();
                     self.project = project;
-                    self.scenarios = default_scenarios();
+                    self.scenarios = scenarios;
                     self.active_scenario = None;
                     self.result_scenario = None;
                     self.selected = None;
                     self.refresh()?;
-                    Ok("Projet chargé depuis SQLite.".into())
+                    Ok("Projet et scénarios chargés depuis SQLite.".into())
                 });
             self.report(result);
         }

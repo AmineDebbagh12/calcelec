@@ -1,7 +1,8 @@
 use calcelec::{
     model::Equipment,
+    project::Project,
     reference_cases,
-    scenario::{InjectionOverride, Scenario, ScenarioKind},
+    scenario::{InjectionOverride, Scenario, ScenarioCollection, ScenarioKind},
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -61,6 +62,29 @@ fn compact_scenario_scales_all_injections_then_applies_sparse_overrides() {
         serde_json::from_str::<Scenario>(&encoded).unwrap(),
         scenario
     );
+}
+
+#[test]
+fn collection_is_bound_to_one_project_version_and_rejects_duplicate_ids() {
+    let project = Project::new(reference_cases::rural_unbalanced()).unwrap();
+    let scenario = Scenario {
+        id: Uuid::new_v4(),
+        name: "Pointe".into(),
+        kind: ScenarioKind::MaximumConsumption,
+        load_scale: 1.1,
+        generation_scale: 0.2,
+        injections: BTreeMap::new(),
+    };
+    let collection = ScenarioCollection::new(&project, vec![scenario.clone()]).unwrap();
+    let json = collection.to_json(&project).unwrap();
+    assert_eq!(
+        ScenarioCollection::from_json(&project, &json).unwrap(),
+        collection
+    );
+    assert!(ScenarioCollection::new(&project, vec![scenario.clone(), scenario]).is_err());
+
+    let other = Project::new(reference_cases::rural_unbalanced()).unwrap();
+    assert!(ScenarioCollection::from_json(&other, &json).is_err());
 }
 
 #[test]

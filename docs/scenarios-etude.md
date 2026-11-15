@@ -58,7 +58,19 @@ le résultat précédent. La traçabilité affichée et le JSON exporté contien
 scénario complet, les options et la version du moteur. Les fichiers scénario
 peuvent être importés et exportés depuis ce même panneau.
 
-La collection reste locale à la session ; chaque scénario à conserver doit être
-exporté avant de quitter. Les prochains ajouts seront sa persistance groupée,
-les états de prises/interrupteurs par scénario et la comparaison graphique de
-plusieurs résultats.
+## Collection et persistance
+
+La collection complète possède un schéma propre, l'identifiant du projet et la
+version exacte du réseau. Elle peut être importée ou exportée dans un seul JSON.
+Une collection visant un autre projet ou une autre version est refusée, tout
+comme deux scénarios réutilisant le même identifiant.
+
+Lors de **Enregistrer en base**, SQLite sauvegarde atomiquement l'historique du
+réseau et la collection dans une table dédiée. **Relire ce projet** et le
+chargement depuis la liste restaurent les deux. Les anciennes bases sont mises
+à niveau automatiquement par création de la table ; en l'absence de collection,
+le chargement retourne une liste vide.
+
+Les prochains ajouts seront les états de prises/interrupteurs par scénario et
+la comparaison graphique de plusieurs résultats. La fusion concurrente de deux
+collections modifiées séparément reste également à définir.

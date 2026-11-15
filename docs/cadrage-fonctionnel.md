@@ -425,7 +425,7 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; le diagnostic de topologie est partagé, mais le calcul équilibré maillé reste à couvrir |
 | C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial et faiblement maillé, terres multi-zones, neutre source impédant, groupes Dyn/Yzn et cas rural détaillé disponibles ; comparaison pandapower disponible sur le sous-domaine commun, neutre/terre externe et mailles générales à compléter |
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Première version radiale IccBmin/3I0 et marges de protection disponible ; shunts homopolaires, cas IEC complets, contributions et mailles à ajouter |
-| E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Scénarios P/Q éditables, sélectionnables et échangeables dans l'interface ; persistance groupée, états de coupure/prise et comparaison à ajouter |
+| E — Application V1 | Cas d'étude, résultats, comparaisons et exports | Scénarios P/Q éditables, échangeables et persistés en collection SQLite ; états de coupure/prise et comparaison à ajouter |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
 | E ter — Vues réseau et mondes internes | Carte externe, unifilaire global dérivé et unifilaires locaux des postes | Navigation sans ambiguïté, rattachements et bornes persistés, aucune divergence silencieuse entre géographie externe et contenu interne |
 | F — Ergonomie, langues et livraison | Édition géographique affinée, français/anglais et distributions | Parcours métier testés avec des utilisateurs cibles dans les deux langues ; corrections d'ergonomie et essais natifs Windows/Linux |
@@ -444,9 +444,8 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 4. **Réaliser E bis — catalogue technologique** : types versionnés de câbles,
    lignes et transformateurs, instanciation explicite, variantes locales et
    mise à jour contrôlée sans modifier les études historiques.
-5. **Compléter E — études et restitutions** : persister la collection de scénarios,
-   puis comparaison avant-après, états de coupure/prise, persistance des résultats,
-   exports CSV et rapport.
+5. **Compléter E — études et restitutions** : comparaison avant-après des scénarios,
+   états de coupure/prise, persistance des résultats, exports CSV et rapport.
 6. **Réaliser E ter — mondes internes** : ajouter le modèle de conteneur et ses
    bornes, puis la navigation carte → poste → unifilaire interne et le retour
    synchronisé vers la carte, selon l'inspiration fonctionnelle d'Erable.

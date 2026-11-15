@@ -1,5 +1,6 @@
 //! Compact, shareable operating scenarios applied without mutating a project version.
 use crate::model::{Equipment, Error, Id, Network, Result};
+use crate::project::Project;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -104,6 +105,68 @@ impl Scenario {
         }
         result.validate()?;
         Ok(result)
+    }
+}
+
+pub const COLLECTION_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioCollection {
+    pub schema_version: u32,
+    pub project_id: Id,
+    pub network_version: Id,
+    pub scenarios: Vec<Scenario>,
+}
+
+impl ScenarioCollection {
+    pub fn new(project: &Project, scenarios: Vec<Scenario>) -> Result<Self> {
+        let collection = Self {
+            schema_version: COLLECTION_SCHEMA_VERSION,
+            project_id: project.id,
+            network_version: project.head(),
+            scenarios,
+        };
+        collection.validate(project)?;
+        Ok(collection)
+    }
+
+    pub fn validate(&self, project: &Project) -> Result<()> {
+        if self.schema_version != COLLECTION_SCHEMA_VERSION {
+            return Err(Error::Invalid(format!(
+                "schéma de collection de scénarios {} non supporté",
+                self.schema_version
+            )));
+        }
+        if self.project_id != project.id || self.network_version != project.head() {
+            return Err(Error::Conflict(
+                "la collection de scénarios cible un autre projet ou une autre version du réseau"
+                    .into(),
+            ));
+        }
+        let network = project.network()?;
+        let mut identifiers = std::collections::BTreeSet::new();
+        for scenario in &self.scenarios {
+            if !identifiers.insert(scenario.id) {
+                return Err(Error::Invalid(format!(
+                    "identifiant de scénario réutilisé : {}",
+                    scenario.id
+                )));
+            }
+            scenario.validate(&network)?;
+        }
+        Ok(())
+    }
+
+    pub fn from_json(project: &Project, json: &str) -> Result<Self> {
+        let collection: Self = serde_json::from_str(json)?;
+        collection.validate(project)?;
+        Ok(collection)
+    }
+
+    pub fn to_json(&self, project: &Project) -> Result<String> {
+        self.validate(project)?;
+        Ok(serde_json::to_string(self)?)
     }
 }
 

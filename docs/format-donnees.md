@@ -207,6 +207,10 @@ de calcul sans ajouter de lot à l'historique du réseau. Le résultat contient 
 scénario complet, `project_id` et `network_version`, ce qui interdit d'attribuer
 silencieusement un résultat à une autre version. Voir
 [le contrat des scénarios](scenarios-etude.md).
+Une collection regroupe ces documents avec `schema_version`, `project_id` et
+`network_version`. SQLite la stocke dans `scenario_collections` et la met à jour
+dans la même transaction que le réseau lors d'un enregistrement d'espace de
+travail. Elle ne modifie toujours pas les identifiants de versions électriques.
 
 Le résultat `radial-sequence-fault-0.1` reste lui aussi séparé du projet. Il
 enregistre options, version du moteur, impédances de séquence, IccBmin, 3I0
@@ -221,8 +225,8 @@ optionnel et contrôles de seuil. Un contrôle résiduel distingue explicitement
   branches persistant, de fusion, d'export d'une plage de lots ni de points de reprise.
 - Pas de serveur partagé ; le contrat de données est indépendant de SQLite,
   mais un adaptateur distant et son protocole restent à implémenter.
-- Pas encore de disposition graphique persistée, de collection de scénarios,
-  de catalogue ni de résultats de simulation dans ce schéma initial. Les fichiers
-  de scénario séparés constituent la première étape sans migration du réseau.
+- Pas encore de disposition graphique persistée, de catalogue ni de résultats
+  de simulation dans ce schéma initial. Les scénarios et leur collection restent
+  des documents liés, sans migration du schéma électrique du réseau.
 - Avant de figer le format V1, compléter le modèle électrique et mesurer les
   tailles, les coûts de reconstruction et les besoins de compression.
