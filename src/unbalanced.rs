@@ -494,6 +494,7 @@ impl Circuit {
                     from,
                     to,
                     closed: true,
+                    ..
                 } => {
                     let (Some(&a), Some(&b)) = (index.get(&from), index.get(&to)) else {
                         continue;

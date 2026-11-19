@@ -216,6 +216,7 @@ fn loops_parallel_lines_disconnected_buses_and_multiple_sources_are_refused() {
             from: root,
             to: end,
             closed: true,
+            installation: Default::default(),
         },
     );
     parallel.objects.insert(switch.id, switch);
@@ -255,6 +256,7 @@ fn open_switch_is_excluded_and_closed_switch_has_no_voltage_drop() {
         from: root,
         to: end,
         closed: true,
+        installation: Default::default(),
     };
     let result = load_flow::solve(&n, &Options::default()).unwrap();
     assert!(result.buses.iter().all(|b| b.voltage_pu == 1.0));
@@ -263,6 +265,7 @@ fn open_switch_is_excluded_and_closed_switch_has_no_voltage_drop() {
         from: root,
         to: end,
         closed: false,
+        installation: Default::default(),
     };
     assert!(load_flow::solve(&n, &Options::default()).is_err());
 }
@@ -362,6 +365,7 @@ fn non_finite_derived_outputs_are_rejected_instead_of_exporting_null() {
         from: root,
         to: n.objects[&line].buses()[1],
         closed: true,
+        installation: Default::default(),
     };
     assert!(matches!(
         load_flow::solve(&n, &Options::default()),

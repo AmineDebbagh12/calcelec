@@ -358,6 +358,7 @@ pub fn solve(network: &Network, options: &Options) -> Result<ShortCircuitResult>
                     from,
                     to,
                     closed: true,
+                    ..
                 },
                 _,
             ) => (*from, *to, EdgeModel::Switch),

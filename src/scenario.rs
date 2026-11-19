@@ -33,8 +33,6 @@ pub struct EquipmentOverride {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_service: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub switch_closed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tap_position: Option<i16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceOverride>,
@@ -125,21 +123,18 @@ impl Scenario {
                     object.name
                 )));
             }
+            if matches!(object.equipment, Equipment::Switch { .. }) {
+                return Err(Error::Invalid(format!(
+                    "{} : l'état ouvert/fermé d'un interrupteur appartient au réseau versionné, pas au scénario",
+                    object.name
+                )));
+            }
             if values.in_service.is_none()
-                && values.switch_closed.is_none()
                 && values.tap_position.is_none()
                 && values.source.is_none()
             {
                 return Err(Error::Invalid(format!(
                     "{} : modification d'exploitation vide",
-                    object.name
-                )));
-            }
-            if values.switch_closed.is_some()
-                && !matches!(object.equipment, Equipment::Switch { .. })
-            {
-                return Err(Error::Invalid(format!(
-                    "{} : l'état ouvert/fermé ne s'applique qu'à un interrupteur",
                     object.name
                 )));
             }
@@ -225,15 +220,6 @@ impl Scenario {
                 .expect("validated operating-state object exists");
             if let Some(in_service) = values.in_service {
                 object.in_service = in_service;
-            }
-            if let Some(closed) = values.switch_closed {
-                let Equipment::Switch {
-                    closed: current, ..
-                } = &mut object.equipment
-                else {
-                    unreachable!("validated switch override")
-                };
-                *current = closed;
             }
             if let Some(position) = values.tap_position {
                 let Some(ElectricalData::Transformer(data)) = &mut object.electrical else {

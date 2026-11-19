@@ -512,13 +512,13 @@ impl Desktop {
                 egui::ComboBox::from_id_salt("branch_kind")
                     .selected_text(match self.branch_kind {
                         BranchKind::Line => "Tronçon",
-                        BranchKind::Switch => "Interrupteur",
+                        BranchKind::Switch => "Interrupteur aérien HTA",
                         BranchKind::Transformer => "Transformateur",
                     })
                     .show_ui(ui, |ui| {
                         for (kind, label) in [
                             (BranchKind::Line, "Tronçon"),
-                            (BranchKind::Switch, "Interrupteur"),
+                            (BranchKind::Switch, "Interrupteur aérien HTA"),
                             (BranchKind::Transformer, "Transformateur"),
                         ] {
                             if ui
@@ -765,13 +765,10 @@ impl Desktop {
                                 Equipment::Load { .. }
                                     | Equipment::Generator { .. }
                                     | Equipment::Bus { .. }
+                                    | Equipment::Switch { .. }
                             ) {
                                 return None;
                             }
-                            let closed = match object.equipment {
-                                Equipment::Switch { closed, .. } => Some(closed),
-                                _ => None,
-                            };
                             let tap = match &object.electrical {
                                 Some(calcelec::electrical::ElectricalData::Transformer(data)) => {
                                     data.tap.as_ref().map(|tap| {
@@ -799,14 +796,13 @@ impl Desktop {
                                 object.id,
                                 object.name.clone(),
                                 object.in_service,
-                                closed,
                                 tap,
                                 source,
                             ))
                         })
                         .collect();
                     candidates.sort_by(|left, right| left.1.cmp(&right.1));
-                    for (id, name, in_service, closed, tap, source) in candidates {
+                    for (id, name, in_service, tap, source) in candidates {
                         let mut enabled = edited.equipment.contains_key(&id);
                         if ui.checkbox(&mut enabled, name).changed() {
                             if enabled {
@@ -814,7 +810,6 @@ impl Desktop {
                                     id,
                                     EquipmentOverride {
                                         in_service: Some(in_service),
-                                        switch_closed: closed,
                                         tap_position: tap.map(|value| value.0),
                                         source: None,
                                     },
@@ -828,11 +823,6 @@ impl Desktop {
                                 let mut service = values.in_service.unwrap_or(in_service);
                                 ui.checkbox(&mut service, "En service");
                                 values.in_service = Some(service);
-                                if let Some(default) = closed {
-                                    let mut value = values.switch_closed.unwrap_or(default);
-                                    ui.checkbox(&mut value, "Interrupteur fermé");
-                                    values.switch_closed = Some(value);
-                                }
                                 if let Some((default, minimum, maximum)) = tap {
                                     let mut position = values.tap_position.unwrap_or(default);
                                     ui.horizontal(|ui| {
@@ -1764,7 +1754,7 @@ impl Desktop {
                 ScreeningStatus::Unable => ("Non calculable complètement", Color32::YELLOW),
             };
             ui.colored_label(color, label);
-            ui.small("Le réseau de base couvre aussi les scénarios P/Q purs. Chaque scénario qui modifie un interrupteur, l'état d'un ouvrage ou une prise possède son propre calcul de défaut.");
+            ui.small("Le réseau de base couvre aussi les scénarios P/Q purs. Chaque scénario qui modifie l'état d'un ouvrage, une prise ou une hypothèse de source possède son propre calcul de défaut. L'état ouvert/fermé des interrupteurs vient de la version du réseau.");
             egui::Grid::new("screening_fault_cases")
                 .striped(true)
                 .show(ui, |ui| {
@@ -2184,7 +2174,12 @@ impl Desktop {
                             }
                         });
                 }
-                Equipment::Switch { from, to, closed } => {
+                Equipment::Switch {
+                    from,
+                    to,
+                    closed,
+                    installation,
+                } => {
                     if self.geographic {
                         required_bus_choice(ui, &self.network, "Départ", from);
                         required_bus_choice(ui, &self.network, "Arrivée", to);
@@ -2193,6 +2188,14 @@ impl Desktop {
                         readonly_bus(ui, &self.network, "Arrivée", *to);
                     }
                     ui.checkbox(closed, "Fermé");
+                    ui.label(match installation {
+                        calcelec::model::SwitchInstallation::AerialHta => {
+                            "Installation : ouvrage aérien HTA"
+                        }
+                        calcelec::model::SwitchInstallation::Generic => {
+                            "Installation : interrupteur historique générique"
+                        }
+                    });
                 }
             }
             ui.small("Les changements de bornes sont explicites et ne déplacent pas la géométrie.");
@@ -2904,7 +2907,6 @@ mod tests {
             transformer,
             EquipmentOverride {
                 in_service: None,
-                switch_closed: None,
                 tap_position: Some(1),
                 source: None,
             },

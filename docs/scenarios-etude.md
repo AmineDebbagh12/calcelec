@@ -16,12 +16,17 @@ Une exception peut imposer P, Q et/ou l'état en service. Elle est appliquée ap
 le coefficient global. Les valeurs absentes héritent donc du réseau mis à
 l'échelle. Seules les charges et productions peuvent être ciblées.
 
-Un état d'exploitation peut modifier `in_service`, `switch_closed` pour un
-interrupteur, et `tap_position` pour un transformateur dont le régleur est
-explicitement décrit. Le type d'ouvrage et les bornes de prise sont validés
-avant toute application. Le réseau versionné reste inchangé : le solveur reçoit
-une copie d'étude. Le fichier
+Un état d'exploitation peut modifier `in_service` et `tap_position` pour un
+transformateur dont le régleur est explicitement décrit. Le type d'ouvrage et
+les bornes de prise sont validés avant toute application. Le réseau versionné
+reste inchangé : le solveur reçoit une copie d'étude. Le fichier
 `examples/scenario-transformer-tap.json` fournit un exemple compact.
+
+L'état ouvert/fermé d'un interrupteur n'est pas une propriété de scénario. Il
+est édité sur l'ouvrage, enregistré dans une version du réseau puis respecté par
+les diagnostics et calculs. La future étude automatique des schémas de reprise
+relève du périmètre V2 et ne sera pas représentée par une liste manuelle de
+`switch_closed`.
 
 Depuis la V0.18, un état de source peut en plus surcharger `voltage_pu` et les
 impédances de séquence `positive_sequence_ohm`, `negative_sequence_ohm` et
@@ -123,8 +128,8 @@ Depuis la V0.17, l'interface peut joindre au verdict l'étude IccBmin/3I0 et ses
 marges de protection. Les paramètres sont chargés depuis le JSON d'options du
 moteur de défaut. Le réseau de base couvre les scénarios P/Q purs, puisque le
 moteur néglige encore charges et contributions des producteurs. Depuis la V0.17.1,
-chaque scénario modifiant un interrupteur, l'état de service ou une prise est en
-revanche recalculé séparément pour le défaut. Un critère 3I0 demandé mais non
+chaque scénario modifiant l'état de service, une prise ou les hypothèses de source
+est en revanche recalculé séparément pour le défaut. Un critère 3I0 demandé mais non
 calculable rend le verdict global incomplet, jamais conforme.
 
 Les prochains ajouts porteront sur la persistance des rapports et les exports.

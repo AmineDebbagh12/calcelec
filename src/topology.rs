@@ -41,7 +41,9 @@ pub fn analyze(network: &Network) -> Result<TopologyReport> {
             Equipment::Line { from, to, .. } | Equipment::Transformer { from, to, .. } => {
                 Some((from, to))
             }
-            Equipment::Switch { from, to, closed } => {
+            Equipment::Switch {
+                from, to, closed, ..
+            } => {
                 if closed {
                     closed_switches.push(object.id);
                     Some((from, to))

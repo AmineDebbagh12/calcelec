@@ -315,6 +315,7 @@ impl Circuit {
                     from,
                     to,
                     closed: true,
+                    ..
                 } => {
                     if let (Some(&a), Some(&b)) = (index.get(&from), index.get(&to)) {
                         if let Some(ElectricalData::Switch { conductors }) = &o.electrical

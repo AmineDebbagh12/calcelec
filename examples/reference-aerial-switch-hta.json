@@ -1,0 +1,51 @@
+{
+  "schema_version": 4,
+  "id": "19000000-0000-4000-8000-000000000001",
+  "root_version": "19000000-0000-4000-8000-000000000002",
+  "root": {
+    "name": "Référence synthétique — interrupteur aérien HTA",
+    "frequency_hz": 50.0,
+    "coordinate_reference": "local_meters",
+    "objects": {
+      "19000000-0000-4000-8000-000000000010": {
+        "id": "19000000-0000-4000-8000-000000000010",
+        "name": "Poste source — HTA",
+        "in_service": true,
+        "equipment": { "type": "bus", "voltage_v": 20000.0 },
+        "geometry": { "type": "point", "coordinates": [0.0, 0.0] }
+      },
+      "19000000-0000-4000-8000-000000000011": {
+        "id": "19000000-0000-4000-8000-000000000011",
+        "name": "Départ aval — HTA",
+        "in_service": true,
+        "equipment": { "type": "bus", "voltage_v": 20000.0 },
+        "geometry": { "type": "point", "coordinates": [400.0, 0.0] }
+      },
+      "19000000-0000-4000-8000-000000000020": {
+        "id": "19000000-0000-4000-8000-000000000020",
+        "name": "Équivalent amont",
+        "in_service": true,
+        "equipment": {
+          "type": "source",
+          "bus": "19000000-0000-4000-8000-000000000010",
+          "voltage_pu": 1.0
+        },
+        "geometry": { "type": "point", "coordinates": [0.0, 0.0] }
+      },
+      "19000000-0000-4000-8000-000000000030": {
+        "id": "19000000-0000-4000-8000-000000000030",
+        "name": "Interrupteur aérien HTA — démonstration",
+        "in_service": true,
+        "equipment": {
+          "type": "switch",
+          "from": "19000000-0000-4000-8000-000000000010",
+          "to": "19000000-0000-4000-8000-000000000011",
+          "closed": false,
+          "installation": "aerial_hta"
+        },
+        "geometry": { "type": "point", "coordinates": [200.0, 0.0] }
+      }
+    }
+  },
+  "changes": []
+}

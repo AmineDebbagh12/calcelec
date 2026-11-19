@@ -8,7 +8,7 @@ HTA/BT, avec la France et Enedis comme référence métier.
 les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT.
 Un premier moteur radial de court-circuit publie IccBmin, 3I0 et les marges de
 protection ; son périmètre IEC 60909 reste à étendre.**
-La version de développement courante est **V0.18**.
+La version de développement courante est **V0.19**.
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -72,15 +72,21 @@ L'enregistrement SQLite conserve atomiquement la collection avec le réseau et
 son historique. Toute la collection peut aussi être transférée dans un fichier
 JSON lié à l'identifiant du projet et à sa version exacte.
 Depuis la V0.17.1, la rubrique **États d'exploitation** peut aussi mettre un
-ouvrage en/hors service, ouvrir ou fermer un interrupteur et choisir la prise
-d'un transformateur déclaré. Ces exceptions restent dans le scénario compact
-et ne modifient pas la version du réseau.
+ouvrage en/hors service et choisir la prise d'un transformateur déclaré. Ces
+exceptions restent dans le scénario compact et ne modifient pas la version du
+réseau. L'état ouvert/fermé d'un interrupteur appartient au contraire à la
+version du réseau et se modifie dans son inspecteur.
 En V0.18, la même rubrique peut surcharger la tension de la source et ses
 impédances directe Z1, inverse Z2 et homopolaire Z0. Ces hypothèses permettent
 de représenter des puissances de court-circuit amont différentes selon le
 scénario : la tension en pu agit sur le régime permanent, tandis que Z1/Z2/Z0
 influencent directement IccBmin et 3I0. Le facteur `cmin` reste une option
 explicite de l'étude de défaut.
+En V0.19, la toolbox crée des **interrupteurs aériens HTA** explicitement
+identifiés dans le format. Ils sont ponctuels sur la carte, ne peuvent relier
+que deux nœuds d'au moins 1 kV, possèdent un symbole ouvert/fermé et participent
+au diagnostic topologique et aux calculs dans l'état enregistré sur le réseau.
+Les anciens interrupteurs sans catégorie restent lisibles comme ouvrages génériques.
 
 Le bouton **Vérifier toutes les situations** calcule toute la collection (et,
 au choix, le réseau de base). Il ne compare pas les scénarios deux à deux : il
@@ -104,7 +110,7 @@ la vue géographique ; le glisser droit déplace la vue et la molette zoome.
 | --- | --- |
 | Sélection | Cliquer un objet ; les clics répétés parcourent les objets superposés |
 | Placer | Choisir un poste HTA/BT, nœud HTA/BT, charge, production ou source, puis cliquer la carte ; choisir explicitement le nœud de raccordement des injections |
-| Raccorder | Choisir le type de liaison et ses deux bornes ; pour un tronçon, commencer le tracé, cliquer ses sommets intermédiaires puis terminer ; pour un interrupteur ou transformateur, créer la liaison avec le bouton |
+| Raccorder | Choisir le type de liaison et ses deux bornes ; pour un tronçon, commencer le tracé, cliquer ses sommets intermédiaires puis terminer ; l'interrupteur aérien exige deux bornes HTA et le transformateur deux tensions différentes |
 | Déplacer | Sélectionner l'objet puis glisser son point ou son tracé avec le bouton gauche |
 | Sommets | Sélectionner un tronçon puis glisser une de ses poignées ; ajouter/supprimer des sommets depuis les propriétés |
 
@@ -119,6 +125,11 @@ sans application partielle. Les nouveaux équipements reçoivent des paramètres
 provisoires visibles dans l'inspecteur, qui ne constituent pas un catalogue Enedis.
 La longueur électrique d'un nouveau tronçon est initialisée depuis son tracé.
 Les déplacements ultérieurs ne changent ni cette longueur ni ses connexions.
+
+Le cas minimal V0.19 peut être ouvert dans l'application avec
+`examples/reference-aerial-switch-hta.json`. Son interrupteur est initialement
+ouvert. Le sélectionner, cocher **Fermé**, créer une version puis lancer un
+calcul permet de vérifier l'alimentation du nœud aval.
 
 Un poste placé crée ensemble deux nœuds HTA/BT et un transformateur. Ces trois
 objets restent distincts et sélectionnables. Le déplacement agit sur l'objet
@@ -312,8 +323,6 @@ projection du neutre métallique vers le modèle de retour de terre pandapower.
 - Étendre la comparaison indépendante aux modèles de neutre/terre, Yzn et aux
   topologies maillées ; compléter le moteur de défaut par les shunts homopolaires,
   cas min/max IEC 60909, contributions et défauts triphasés.
-- Ajouter avant le catalogue les interrupteurs aériens HTA comme ouvrages
-  géographiques externes, avec état, raccordements et scénarios d'exploitation.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents
@@ -328,5 +337,6 @@ projection du neutre métallique vers le modèle de retour de terre pandapower.
 - Proposer le français et l'anglais, avec choix de langue mémorisé, traduction
   de l'interface, des diagnostics et des rapports ; le prototype reste actuellement en français.
 - Vérifier l'application native et préparer les distributions Windows/Linux.
-- Après la V1, étudier les bouclages entre départs de postes sources et les
-  schémas normal/secours à l'échelle de plusieurs départs.
+- En V2, détecter les départs radiaux issus de chaque demi-rame du poste source,
+  identifier leurs liaisons de secours, puis construire automatiquement les cas
+  où un départ reprend les réseaux secourus et vérifier leurs contraintes.

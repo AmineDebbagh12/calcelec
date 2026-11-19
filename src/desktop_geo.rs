@@ -454,7 +454,23 @@ impl MapView {
             } else {
                 color
             };
-            if matches!(
+            if let Equipment::Switch {
+                closed,
+                installation: calcelec::model::SwitchInstallation::AerialHta,
+                ..
+            } = o.equipment
+            {
+                let left = p + Vec2::new(-8.0, 0.0);
+                let right = p + Vec2::new(8.0, 0.0);
+                painter.circle_filled(left, 2.5, color);
+                painter.circle_filled(right, 2.5, color);
+                let blade_end = if closed {
+                    right
+                } else {
+                    p + Vec2::new(6.0, -7.0)
+                };
+                painter.line_segment([left, blade_end], Stroke::new(2.5, color));
+            } else if matches!(
                 o.equipment,
                 Equipment::Transformer { .. } | Equipment::Source { .. }
             ) {

@@ -292,7 +292,6 @@ fn fault_screening_recomputes_operating_variants_but_not_pq_only_scenarios() {
         line,
         EquipmentOverride {
             in_service: Some(false),
-            switch_closed: None,
             tap_position: None,
             source: None,
         },
@@ -333,7 +332,6 @@ fn source_strength_scenario_changes_the_fault_case_values() {
         source,
         EquipmentOverride {
             in_service: None,
-            switch_closed: None,
             tap_position: None,
             source: Some(SourceOverride {
                 voltage_pu: Some(0.98),

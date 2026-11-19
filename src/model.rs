@@ -61,7 +61,18 @@ pub enum Equipment {
         from: Id,
         to: Id,
         closed: bool,
+        /// Physical installation. Missing in older projects, which remain generic.
+        #[serde(default)]
+        installation: SwitchInstallation,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchInstallation {
+    #[default]
+    Generic,
+    AerialHta,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -104,6 +115,10 @@ impl Object {
             Equipment::Transformer { .. } => "Transformateur",
             Equipment::Load { .. } => "Consommation",
             Equipment::Generator { .. } => "Production PV",
+            Equipment::Switch {
+                installation: SwitchInstallation::AerialHta,
+                ..
+            } => "Interrupteur aérien HTA",
             Equipment::Switch { .. } => "Interrupteur",
         }
     }
@@ -227,7 +242,25 @@ impl Network {
                         )));
                     }
                 }
-                Equipment::Switch { from, to, .. } => self.same_voltage(from, to)?,
+                Equipment::Switch {
+                    from,
+                    to,
+                    installation,
+                    ..
+                } => {
+                    self.same_voltage(from, to)?;
+                    if installation == SwitchInstallation::AerialHta {
+                        let Equipment::Bus { voltage_v } = self.objects[&from].equipment else {
+                            unreachable!("switch endpoints were validated as buses")
+                        };
+                        if voltage_v < 1_000.0 {
+                            return Err(Error::Invalid(format!(
+                                "{} : un interrupteur aérien HTA exige deux bornes HTA",
+                                object.name
+                            )));
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -263,6 +296,7 @@ impl Network {
                         from,
                         to,
                         closed: true,
+                        ..
                     } => Some((from, to)),
                     _ => None,
                 };

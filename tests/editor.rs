@@ -1,7 +1,7 @@
 use calcelec::{
     editor::{self, BranchKind, EditHistory, Placement},
     geometry::Coordinate,
-    model::{Equipment, Network, rural_example},
+    model::{Equipment, Network, SwitchInstallation, rural_example},
     project::{Operation, Project, SCHEMA_VERSION},
     storage::Store,
 };
@@ -125,8 +125,17 @@ fn invalid_routing_and_incomplete_attachments_are_rejected() {
     let n = rural_example();
     let hta = bus(&n, 20000.0);
     let bt = bus(&n, 400.0);
+    let other_bt = n
+        .objects
+        .values()
+        .find(|o| {
+            o.id != bt && matches!(o.equipment, Equipment::Bus { voltage_v } if voltage_v == 400.0)
+        })
+        .unwrap()
+        .id;
     assert!(editor::branch(&n, BranchKind::Line, Some(hta), Some(bt), &[]).is_err());
     assert!(editor::branch(&n, BranchKind::Switch, Some(hta), Some(hta), &[]).is_err());
+    assert!(editor::branch(&n, BranchKind::Switch, Some(bt), Some(other_bt), &[]).is_err());
     assert!(editor::placement(&n, Placement::Load, Coordinate(1.0, 1.0), None).is_err());
     assert!(
         editor::placement(
@@ -137,6 +146,53 @@ fn invalid_routing_and_incomplete_attachments_are_rejected() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn aerial_switch_is_an_explicit_hta_geographic_asset() {
+    let n = rural_example();
+    let buses: Vec<_> = n
+        .objects
+        .values()
+        .filter(|o| matches!(o.equipment, Equipment::Bus { voltage_v } if voltage_v == 20_000.0))
+        .map(|o| o.id)
+        .collect();
+    let operation =
+        editor::branch(&n, BranchKind::Switch, Some(buses[0]), Some(buses[1]), &[]).unwrap();
+    let Operation::Create { object } = operation else {
+        unreachable!()
+    };
+    assert_eq!(object.kind(), "Interrupteur aérien HTA");
+    assert!(matches!(
+        object.equipment,
+        Equipment::Switch {
+            installation: SwitchInstallation::AerialHta,
+            closed: true,
+            ..
+        }
+    ));
+    assert!(matches!(
+        object.geometry,
+        calcelec::geometry::Geometry::Point(_)
+    ));
+}
+
+#[test]
+fn switch_without_installation_keeps_legacy_json_compatibility() {
+    let equipment: Equipment = serde_json::from_value(serde_json::json!({
+        "type": "switch",
+        "from": "10000000-0000-4000-8000-000000000001",
+        "to": "10000000-0000-4000-8000-000000000002",
+        "closed": false
+    }))
+    .unwrap();
+    assert!(matches!(
+        equipment,
+        Equipment::Switch {
+            installation: SwitchInstallation::Generic,
+            ..
+        }
+    ));
 }
 #[test]
 fn deletion_requires_explicit_dependents_and_undo_restores_them() {

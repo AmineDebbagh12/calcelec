@@ -37,6 +37,9 @@ départ, le diagnostic distingue le composant sans source.
 
 Dans le périmètre V1, les interrupteurs aériens HTA seront des ouvrages
 géographiques externes directement couverts par ce diagnostic. Les interrupteurs
-de poste attendront les mondes internes unifilaires. Les bouclages entre départs
-issus de postes sources et l'étude des schémas normal/secours sont reportés après
-la V1, car ils demandent une représentation multi-départs et des règles de reprise.
+de poste attendront les mondes internes unifilaires. En V2, la représentation du
+poste source devra distinguer transformateurs et demi-rames, détecter les départs
+radiaux qui en sont issus et identifier leurs liaisons de secours. Le moteur
+construira alors automatiquement, départ par départ, les configurations de
+reprise et leurs calculs de contraintes ; ces cas ne seront pas des scénarios
+manuels d'ouverture/fermeture.

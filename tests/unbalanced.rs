@@ -511,6 +511,7 @@ fn closing_an_abcn_tie_switch_changes_the_operating_topology_without_voltage_dro
             from,
             to,
             closed: false,
+            installation: Default::default(),
         },
     );
     switch.electrical = Some(ElectricalData::Switch {

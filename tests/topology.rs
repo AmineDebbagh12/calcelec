@@ -1,5 +1,5 @@
 use calcelec::{
-    model::{Equipment, Object},
+    model::{Equipment, Object, SwitchInstallation},
     reference_cases, topology,
 };
 
@@ -24,6 +24,7 @@ fn topology_report_tracks_open_ties_cycles_and_unenergized_components() {
             from: root,
             to: remote,
             closed: false,
+            installation: SwitchInstallation::AerialHta,
         },
     );
     let tie_id = tie.id;

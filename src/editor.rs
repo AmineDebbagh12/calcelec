@@ -1,7 +1,7 @@
 //! Versioned editing commands shared by the desktop and non-graphical clients.
 use crate::{
     geometry::{Coordinate, Geometry},
-    model::{Equipment, Error, Id, Network, Object, Phase, Result},
+    model::{Equipment, Error, Id, Network, Object, Phase, Result, SwitchInstallation},
     project::{Operation, Project},
 };
 
@@ -154,11 +154,12 @@ pub fn branch(
             )
         }
         BranchKind::Switch => (
-            "Interrupteur",
+            "Interrupteur aérien HTA",
             Equipment::Switch {
                 from: a.id,
                 to: b.id,
                 closed: true,
+                installation: SwitchInstallation::AerialHta,
             },
             Geometry::Point(Coordinate((start.0 + end.0) / 2.0, (start.1 + end.1) / 2.0)),
         ),
@@ -176,6 +177,13 @@ pub fn branch(
     if kind != BranchKind::Transformer && a.equipment != b.equipment {
         return Err(Error::Invalid(
             "un tronçon ou interrupteur exige deux jeux de barres de même tension".into(),
+        ));
+    }
+    if kind == BranchKind::Switch
+        && !matches!(a.equipment, Equipment::Bus { voltage_v } if voltage_v >= 1_000.0)
+    {
+        return Err(Error::Invalid(
+            "un interrupteur aérien doit être raccordé entre deux nœuds HTA".into(),
         ));
     }
     let mut object = Object::new(&format!("{name} {}", network.objects.len() + 1), equipment);

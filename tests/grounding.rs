@@ -298,6 +298,7 @@ fn two_grounds(ideal: bool) -> (Network, Uuid, Uuid) {
             from: middle,
             to: end,
             closed: true,
+            installation: Default::default(),
         },
     );
     switch.electrical = Some(ElectricalData::Switch {

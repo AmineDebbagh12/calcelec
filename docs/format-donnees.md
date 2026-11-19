@@ -63,6 +63,12 @@ linéiques. La tension nominale d'un jeu de barres triphasé est composée.
 La consommation et la production ont chacune P positive ; leur type détermine
 le sens physique. Aucune équivalence numérique des modèles incomplets n'est supposée.
 
+Depuis la V0.19, un `switch` porte aussi `installation`. La valeur
+`aerial_hta` désigne un ouvrage cartographique externe et impose deux bornes de
+tension nominale identique supérieure ou égale à 1 kV. Le champ absent est lu
+comme `generic` afin de préserver les anciens projets ; il ne désigne jamais
+implicitement un interrupteur interne de poste.
+
 ## Lot de modifications
 
 Exemple illustratif, avec identifiants à remplacer par ceux du projet concerné :
@@ -203,11 +209,13 @@ en charge.
 Les scénarios de charge et production sont des documents d'étude séparés du
 schéma 4. Leur identifiant, leur type, deux coefficients globaux et leurs rares
 exceptions P/Q/état forment un format compact. La table `equipment`, absente
-des anciens fichiers, ajoute des modifications clairsemées `in_service`,
-`switch_closed` et `tap_position`, indexées par UUID d'ouvrage. Une surcharge
+des anciens fichiers, ajoute des modifications clairsemées `in_service` et
+`tap_position`, indexées par UUID d'ouvrage. Une surcharge
 `source` peut fixer la tension en pu et Z1/Z2/Z0 en ohms pour les scénarios de
 puissance de court-circuit. L'application produit une copie
-de calcul sans ajouter de lot à l'historique du réseau. Le résultat contient le
+de calcul sans ajouter de lot à l'historique du réseau. `switch_closed` n'est
+pas accepté dans ce format : l'état d'un interrupteur est une donnée versionnée
+du réseau, modifiée par l'opération `set_switch`. Le résultat contient le
 scénario complet, `project_id` et `network_version`, ce qui interdit d'attribuer
 silencieusement un résultat à une autre version. Voir
 [le contrat des scénarios](scenarios-etude.md).
