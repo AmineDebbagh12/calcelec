@@ -7,6 +7,7 @@ pub mod model;
 pub mod project;
 pub mod reference_cases;
 pub mod scenario;
+pub mod screening;
 pub mod short_circuit;
 pub mod storage;
 pub mod topology;

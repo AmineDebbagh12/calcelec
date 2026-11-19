@@ -71,6 +71,14 @@ L'enregistrement SQLite conserve atomiquement la collection avec le réseau et
 son historique. Toute la collection peut aussi être transférée dans un fichier
 JSON lié à l'identifiant du projet et à sa version exacte.
 
+Le bouton **Vérifier toutes les situations** calcule toute la collection (et,
+au choix, le réseau de base). Il ne compare pas les scénarios deux à deux : il
+rend un verdict conforme/en contrainte/non calculable pour chacun, puis un
+verdict global conservateur. Le rapport donne les dépassements de tension et de
+charge ainsi que, pour chaque ouvrage et grandeur, la situation dimensionnante.
+Il est exportable en JSON et les ouvrages contraints apparaissent en rouge sur
+la carte. Une situation non calculable interdit de conclure à la conformité.
+
 ## Toolbox géographique
 
 La toolbox se trouve en haut du panneau droit. Les actions de carte concernent

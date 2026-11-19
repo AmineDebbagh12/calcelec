@@ -71,6 +71,32 @@ chargement depuis la liste restaurent les deux. Les anciennes bases sont mises
 à niveau automatiquement par création de la table ; en l'absence de collection,
 le chargement retourne une liste vide.
 
+## Vérification de toutes les situations
+
+Le dimensionnement ne repose pas sur une comparaison deux à deux. La commande
+**Vérifier toutes les situations** calcule chaque scénario, avec le réseau de
+base en option, puis applique les mêmes seuils à chaque résultat : tension
+minimale, tension maximale et taux de charge maximal. Le rapport contient :
+
+- un verdict propre à chaque situation et la liste de ses contraintes ;
+- un verdict global, conforme uniquement si toutes les situations sont calculées
+  et conformes ;
+- une enveloppe par ouvrage et par grandeur, avec la valeur la plus défavorable
+  et le scénario qui l'a produite ;
+- la version du projet, du réseau et du moteur pour assurer la traçabilité.
+
+L'état `unable` est distinct d'une contrainte : une situation invalide ou non
+convergente empêche de démontrer la conformité du réseau, sans masquer les
+résultats obtenus pour les autres situations. Le rapport JSON peut être partagé
+indépendamment du projet.
+
+En mode déséquilibré, l'enveloppe publie aussi U2/U1 et le déplacement du neutre.
+Ces grandeurs deviennent contraignantes seulement lorsqu'un seuil est configuré
+par le modèle appelant ; l'interface expose actuellement les seuils de tension
+et de charge. IccBmin et 3I0 ne font pas encore partie de cette passe
+multi-situations : leur intégration au même verdict est le prochain prolongement
+du moteur de court-circuit.
+
 Les prochains ajouts seront les états de prises/interrupteurs par scénario et
-la comparaison graphique de plusieurs résultats. La fusion concurrente de deux
+l'intégration des contraintes IccBmin/3I0. La fusion concurrente de deux
 collections modifiées séparément reste également à définir.

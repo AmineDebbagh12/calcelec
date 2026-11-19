@@ -8,6 +8,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec
 pub enum MapResults<'a> {
     Balanced(&'a calcelec::load_flow::LoadFlow),
     Unbalanced(&'a calcelec::unbalanced::LoadFlow),
+    Screening(&'a calcelec::screening::ScreeningReport),
 }
 impl MapResults<'_> {
     fn overloaded(self, id: Id) -> bool {
@@ -20,6 +21,11 @@ impl MapResults<'_> {
                 .branches
                 .iter()
                 .any(|b| b.id == id && b.loading_percent.is_some_and(|p| p > 100.0)),
+            Self::Screening(r) => r.dimensioning_cases.iter().any(|case| {
+                case.object_id == id
+                    && case.constrained
+                    && case.metric == calcelec::screening::MetricKind::MaximumLoading
+            }),
         }
     }
     fn outside(self, id: Id) -> bool {
@@ -32,6 +38,17 @@ impl MapResults<'_> {
                 .buses
                 .iter()
                 .any(|b| b.id == id && b.phase_neutral.iter().any(|p| p.outside_voltage_limits)),
+            Self::Screening(r) => r.dimensioning_cases.iter().any(|case| {
+                case.object_id == id
+                    && case.constrained
+                    && matches!(
+                        case.metric,
+                        calcelec::screening::MetricKind::MinimumVoltage
+                            | calcelec::screening::MetricKind::MaximumVoltage
+                            | calcelec::screening::MetricKind::NegativeSequence
+                            | calcelec::screening::MetricKind::NeutralDisplacement
+                    )
+            }),
         }
     }
     fn value(self, id: Id) -> Option<String> {
@@ -79,6 +96,15 @@ impl MapResults<'_> {
                         )
                     })
                 }),
+            Self::Screening(r) => {
+                let cases: Vec<_> = r
+                    .dimensioning_cases
+                    .iter()
+                    .filter(|case| case.object_id == id && case.constrained)
+                    .map(|case| format!("{:.3} {} · {}", case.value, case.unit, case.scenario_name))
+                    .collect();
+                (!cases.is_empty()).then(|| cases.join(" / "))
+            }
         }
     }
 }

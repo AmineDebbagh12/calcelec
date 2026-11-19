@@ -6,6 +6,7 @@ use calcelec::{
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
     scenario::{InjectionOverride, Scenario, ScenarioCollection, ScenarioKind},
+    screening::{self, MetricKind, ScreeningReport, ScreeningStatus},
     storage::{self, Store},
 };
 use eframe::egui::{self, Color32, Pos2, Stroke, Vec2};
@@ -21,6 +22,15 @@ fn numeric(ui: &mut egui::Ui, label: &str, value: &mut f64) {
         ui.label(label);
         ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(6));
     });
+}
+fn metric_label(metric: MetricKind) -> &'static str {
+    match metric {
+        MetricKind::MinimumVoltage => "Tension minimale",
+        MetricKind::MaximumVoltage => "Tension maximale",
+        MetricKind::MaximumLoading => "Charge maximale",
+        MetricKind::NegativeSequence => "Taux de tension inverse",
+        MetricKind::NeutralDisplacement => "Déplacement du neutre",
+    }
 }
 fn scenario_template(name: &str, kind: ScenarioKind, load: f64, generation: f64) -> Scenario {
     Scenario {
@@ -103,9 +113,10 @@ fn required_bus_choice(ui: &mut egui::Ui, network: &Network, label: &str, value:
 enum CalculationResult {
     Balanced(StudyResult),
     Unbalanced(calcelec::unbalanced::StudyResult),
+    Screening(ScreeningReport),
 }
 struct CalculationTask {
-    receiver: mpsc::Receiver<load_flow::Result<CalculationResult>>,
+    receiver: mpsc::Receiver<std::result::Result<CalculationResult, String>>,
     cancel: Arc<AtomicBool>,
     scenario: Option<Scenario>,
 }
@@ -131,6 +142,9 @@ pub struct Desktop {
     error: bool,
     study: Option<StudyResult>,
     unbalanced_study: Option<calcelec::unbalanced::StudyResult>,
+    screening_report: Option<ScreeningReport>,
+    screening_limits: screening::Limits,
+    screening_include_base: bool,
     use_unbalanced: bool,
     calculation: Option<CalculationTask>,
     simplified_calculation: bool,
@@ -177,6 +191,9 @@ impl Desktop {
             error: false,
             study: None,
             unbalanced_study: None,
+            screening_report: None,
+            screening_limits: screening::Limits::default(),
+            screening_include_base: true,
             use_unbalanced: false,
             calculation: None,
             simplified_calculation: false,
@@ -238,6 +255,11 @@ impl Desktop {
             s.project_id != self.project.id || s.network_version != self.project.head()
         }) {
             self.unbalanced_study = None;
+        }
+        if self.screening_report.as_ref().is_some_and(|report| {
+            report.project_id != self.project.id || report.network_version != self.project.head()
+        }) {
+            self.screening_report = None;
         }
         if self.study.is_none() && self.unbalanced_study.is_none() {
             self.result_scenario = None;
@@ -544,6 +566,7 @@ impl Desktop {
     fn invalidate_scenario_result(&mut self) {
         self.study = None;
         self.unbalanced_study = None;
+        self.screening_report = None;
         self.result_scenario = None;
         if let Some(task) = &self.calculation {
             task.cancel.store(true, Ordering::Relaxed);
@@ -570,7 +593,9 @@ impl Desktop {
                 }
             });
         if self.active_scenario != before_selection {
-            self.invalidate_scenario_result();
+            self.study = None;
+            self.unbalanced_study = None;
+            self.result_scenario = None;
         }
 
         ui.horizontal_wrapped(|ui| {
@@ -779,7 +804,101 @@ impl Desktop {
             }
         });
         ui.separator();
+        ui.strong("Vérification de dimensionnement");
+        ui.small("Chaque situation est calculée séparément. Le rapport indique les contraintes et le scénario dimensionnant de chaque ouvrage.");
+        ui.checkbox(
+            &mut self.screening_include_base,
+            "Inclure le réseau de base",
+        );
+        numeric(
+            ui,
+            "Tension minimale (pu)",
+            &mut self.screening_limits.min_voltage_pu,
+        );
+        numeric(
+            ui,
+            "Tension maximale (pu)",
+            &mut self.screening_limits.max_voltage_pu,
+        );
+        numeric(
+            ui,
+            "Charge maximale (%)",
+            &mut self.screening_limits.max_loading_percent,
+        );
+        if ui
+            .add_enabled(
+                self.calculation.is_none()
+                    && (self.screening_include_base || !self.scenarios.is_empty()),
+                egui::Button::new("Vérifier toutes les situations"),
+            )
+            .clicked()
+        {
+            self.start_screening();
+        }
+        ui.separator();
     }
+
+    fn start_screening(&mut self) {
+        if self.calculation.is_some() {
+            return;
+        }
+        if let Err(error) = self.screening_limits.validate() {
+            self.report(Err(error));
+            return;
+        }
+        let project = self.project.clone();
+        let scenarios = self.scenarios.clone();
+        let limits = self.screening_limits.clone();
+        let include_base = self.screening_include_base;
+        let use_unbalanced = self.use_unbalanced;
+        let balanced_options = if self.simplified_calculation {
+            Options::simplified()
+        } else {
+            Options::default()
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let (sender, receiver) = mpsc::channel();
+        self.study = None;
+        self.unbalanced_study = None;
+        self.screening_report = None;
+        self.result_scenario = None;
+        self.error = false;
+        self.status = format!(
+            "Vérification de {} situation(s) en cours…",
+            scenarios.len() + usize::from(include_base)
+        );
+        self.calculation = Some(CalculationTask {
+            receiver,
+            cancel,
+            scenario: None,
+        });
+        std::thread::spawn(move || {
+            let result = if use_unbalanced {
+                screening::screen_unbalanced(
+                    &project,
+                    &scenarios,
+                    include_base,
+                    &calcelec::unbalanced::Options::default(),
+                    &limits,
+                    &worker_cancel,
+                )
+            } else {
+                screening::screen_balanced(
+                    &project,
+                    &scenarios,
+                    include_base,
+                    &balanced_options,
+                    &limits,
+                    &worker_cancel,
+                )
+            }
+            .map(CalculationResult::Screening)
+            .map_err(|error| error.to_string());
+            let _ = sender.send(result);
+        });
+    }
+
     fn start_calculation(&mut self) {
         if self.calculation.is_some() {
             return;
@@ -817,6 +936,7 @@ impl Desktop {
         let (sender, receiver) = mpsc::channel();
         self.study = None;
         self.unbalanced_study = None;
+        self.screening_report = None;
         self.error = false;
         self.result_scenario = None;
         self.status = match &scenario {
@@ -859,7 +979,8 @@ impl Desktop {
                         result,
                     })
                 })
-            };
+            }
+            .map_err(|error| error.to_string());
             let _ = sender.send(result);
         });
     }
@@ -917,6 +1038,37 @@ impl Desktop {
                 self.results_view = true;
                 self.result_scenario = scenario;
                 self.unbalanced_study = Some(study);
+            }
+            Ok(CalculationResult::Screening(report))
+                if report.project_id == self.project.id
+                    && report.network_version == self.project.head() =>
+            {
+                let constrained = report
+                    .scenarios
+                    .iter()
+                    .filter(|case| case.status == ScreeningStatus::Constrained)
+                    .count();
+                let unable = report
+                    .scenarios
+                    .iter()
+                    .filter(|case| case.status == ScreeningStatus::Unable)
+                    .count();
+                self.status = match report.status {
+                    ScreeningStatus::Compliant => format!(
+                        "Vérification terminée : {} situation(s), aucune contrainte.",
+                        report.scenarios.len()
+                    ),
+                    ScreeningStatus::Constrained => format!(
+                        "Vérification terminée : {constrained} situation(s) en contrainte sur {}.",
+                        report.scenarios.len()
+                    ),
+                    ScreeningStatus::Unable => format!(
+                        "Vérification incomplète : {unable} situation(s) non calculable(s), {constrained} en contrainte."
+                    ),
+                };
+                self.error = report.status != ScreeningStatus::Compliant;
+                self.results_view = true;
+                self.screening_report = Some(report);
             }
             Ok(_) => {
                 self.error = false;
@@ -1154,6 +1306,10 @@ impl Desktop {
         }
     }
     fn results_table(&mut self, ui: &mut egui::Ui) {
+        if self.screening_report.is_some() {
+            self.screening_results_table(ui);
+            return;
+        }
         if self.unbalanced_study.is_some() {
             self.unbalanced_results_table(ui);
             return;
@@ -1291,6 +1447,158 @@ impl Desktop {
                     ui.end_row();
                 }
             });
+        if let Some(id) = clicked {
+            self.select(id);
+        }
+    }
+
+    fn screening_results_table(&mut self, ui: &mut egui::Ui) {
+        let report = self
+            .screening_report
+            .as_ref()
+            .expect("screening report exists")
+            .clone();
+        let (label, color) = match report.status {
+            ScreeningStatus::Compliant => (
+                "RÉSEAU CONFORME DANS TOUTES LES SITUATIONS",
+                Color32::LIGHT_GREEN,
+            ),
+            ScreeningStatus::Constrained => ("RÉSEAU EN CONTRAINTE", Color32::LIGHT_RED),
+            ScreeningStatus::Unable => (
+                "VERDICT INCOMPLET — SITUATION NON CALCULABLE",
+                Color32::YELLOW,
+            ),
+        };
+        ui.heading("Vérification multi-situations");
+        ui.colored_label(color, label);
+        ui.small(format!(
+            "{} situation(s) · moteur {} · version réseau {}",
+            report.scenarios.len(),
+            report.solver_version,
+            report.network_version
+        ));
+        ui.small(format!(
+            "Seuils : {:.4} ≤ U ≤ {:.4} pu · charge ≤ {:.2} %",
+            report.limits.min_voltage_pu,
+            report.limits.max_voltage_pu,
+            report.limits.max_loading_percent
+        ));
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(&mut self.result_path);
+            if ui.button("Exporter le rapport JSON").clicked() {
+                let result = serde_json::to_string(&report)
+                    .map_err(Into::into)
+                    .and_then(|json| storage::export_new(&self.result_path, &json));
+                self.error = result.is_err();
+                self.status = match result {
+                    Ok(()) => "Rapport multi-situations exporté avec sa traçabilité.".into(),
+                    Err(error) => error.to_string(),
+                };
+            }
+        });
+
+        ui.separator();
+        ui.strong("Verdict par situation");
+        egui::Grid::new("screening_scenarios")
+            .striped(true)
+            .show(ui, |ui| {
+                for title in [
+                    "Situation",
+                    "Verdict",
+                    "U min/max (pu)",
+                    "Charge max",
+                    "Contraintes",
+                ] {
+                    ui.strong(title);
+                }
+                ui.end_row();
+                for case in &report.scenarios {
+                    ui.label(&case.scenario_name);
+                    let (status, color) = match case.status {
+                        ScreeningStatus::Compliant => ("Conforme", Color32::LIGHT_GREEN),
+                        ScreeningStatus::Constrained => ("Contrainte", Color32::LIGHT_RED),
+                        ScreeningStatus::Unable => ("Non calculable", Color32::YELLOW),
+                    };
+                    ui.colored_label(color, status);
+                    ui.label(match (case.minimum_voltage_pu, case.maximum_voltage_pu) {
+                        (Some(min), Some(max)) => format!("{min:.4} / {max:.4}"),
+                        _ => "—".into(),
+                    });
+                    ui.label(
+                        case.maximum_loading_percent
+                            .map_or_else(|| "—".into(), |value| format!("{value:.2} %")),
+                    );
+                    ui.label(if let Some(error) = &case.error {
+                        error.clone()
+                    } else {
+                        case.constraints.len().to_string()
+                    });
+                    ui.end_row();
+                }
+            });
+
+        let mut clicked = None;
+        ui.separator();
+        ui.strong("Contraintes dimensionnantes");
+        let constrained: Vec<_> = report
+            .dimensioning_cases
+            .iter()
+            .filter(|case| case.constrained)
+            .collect();
+        if constrained.is_empty() {
+            ui.label("Aucun ouvrage ne dépasse les seuils dans les situations calculées.");
+        } else {
+            egui::Grid::new("screening_constraints")
+                .striped(true)
+                .show(ui, |ui| {
+                    for title in ["Ouvrage", "Grandeur", "Valeur", "Marge", "Situation"] {
+                        ui.strong(title);
+                    }
+                    ui.end_row();
+                    for case in constrained {
+                        let name = self
+                            .network
+                            .objects
+                            .get(&case.object_id)
+                            .map(|object| object.name.as_str())
+                            .unwrap_or("Ouvrage absent");
+                        if ui
+                            .selectable_label(self.selected == Some(case.object_id), name)
+                            .clicked()
+                        {
+                            clicked = Some(case.object_id);
+                        }
+                        ui.label(metric_label(case.metric));
+                        ui.label(format!("{:.4} {}", case.value, case.unit));
+                        ui.colored_label(
+                            Color32::LIGHT_RED,
+                            case.margin.map_or_else(
+                                || "—".into(),
+                                |margin| format!("{margin:.4} {}", case.unit),
+                            ),
+                        );
+                        ui.label(&case.scenario_name);
+                        ui.end_row();
+                    }
+                });
+        }
+        ui.collapsing("Enveloppe complète par ouvrage", |ui| {
+            for case in &report.dimensioning_cases {
+                let name = self
+                    .network
+                    .objects
+                    .get(&case.object_id)
+                    .map(|object| object.name.as_str())
+                    .unwrap_or("Ouvrage absent");
+                ui.label(format!(
+                    "{name} · {} : {:.4} {} · {}",
+                    metric_label(case.metric),
+                    case.value,
+                    case.unit,
+                    case.scenario_name
+                ));
+            }
+        });
         if let Some(id) = clicked {
             self.select(id);
         }
@@ -1922,13 +2230,18 @@ impl Desktop {
                     ui,
                     &self.network,
                     self.selected,
-                    self.study
+                    self.screening_report
                         .as_ref()
-                        .map(|s| MapResults::Balanced(&s.result))
+                        .map(MapResults::Screening)
                         .or_else(|| {
-                            self.unbalanced_study
+                            self.study
                                 .as_ref()
-                                .map(|s| MapResults::Unbalanced(&s.result))
+                                .map(|s| MapResults::Balanced(&s.result))
+                                .or_else(|| {
+                                    self.unbalanced_study
+                                        .as_ref()
+                                        .map(|s| MapResults::Unbalanced(&s.result))
+                                })
                         }),
                     MapTools {
                         mode: self.tool,
