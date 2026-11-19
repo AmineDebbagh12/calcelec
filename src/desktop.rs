@@ -3,9 +3,13 @@ use calcelec::editor::{self, BranchKind, EditHistory, Placement};
 use calcelec::geometry::{Coordinate, Geometry};
 use calcelec::load_flow::{self, Options, StudyResult};
 use calcelec::{
+    electrical::Impedance,
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
-    scenario::{EquipmentOverride, InjectionOverride, Scenario, ScenarioCollection, ScenarioKind},
+    scenario::{
+        EquipmentOverride, InjectionOverride, Scenario, ScenarioCollection, ScenarioKind,
+        SourceOverride,
+    },
     screening::{self, MetricKind, ScreeningReport, ScreeningStatus},
     storage::{self, Store},
 };
@@ -22,6 +26,23 @@ fn numeric(ui: &mut egui::Ui, label: &str, value: &mut f64) {
         ui.label(label);
         ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(6));
     });
+}
+fn optional_impedance(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut Option<Impedance>,
+    base: Option<Impedance>,
+) {
+    let mut enabled = value.is_some();
+    if ui.checkbox(&mut enabled, label).changed() {
+        *value = enabled.then(|| base.unwrap_or(Impedance::ZERO));
+    }
+    if let Some(value) = value {
+        ui.indent(label, |ui| {
+            numeric(ui, "R (ohm)", &mut value.r);
+            numeric(ui, "X (ohm)", &mut value.x);
+        });
+    }
 }
 fn metric_label(metric: MetricKind) -> &'static str {
     match metric {
@@ -759,17 +780,33 @@ impl Desktop {
                                 }
                                 _ => None,
                             };
+                            let source = match (&object.equipment, &object.electrical) {
+                                (
+                                    Equipment::Source { voltage_pu, .. },
+                                    Some(calcelec::electrical::ElectricalData::Source(data)),
+                                ) => Some((
+                                    *voltage_pu,
+                                    data.positive_sequence_ohm,
+                                    data.negative_sequence_ohm,
+                                    data.zero_sequence_ohm,
+                                )),
+                                (Equipment::Source { voltage_pu, .. }, _) => {
+                                    Some((*voltage_pu, None, None, None))
+                                }
+                                _ => None,
+                            };
                             Some((
                                 object.id,
                                 object.name.clone(),
                                 object.in_service,
                                 closed,
                                 tap,
+                                source,
                             ))
                         })
                         .collect();
                     candidates.sort_by(|left, right| left.1.cmp(&right.1));
-                    for (id, name, in_service, closed, tap) in candidates {
+                    for (id, name, in_service, closed, tap, source) in candidates {
                         let mut enabled = edited.equipment.contains_key(&id);
                         if ui.checkbox(&mut enabled, name).changed() {
                             if enabled {
@@ -779,6 +816,7 @@ impl Desktop {
                                         in_service: Some(in_service),
                                         switch_closed: closed,
                                         tap_position: tap.map(|value| value.0),
+                                        source: None,
                                     },
                                 );
                             } else {
@@ -805,6 +843,49 @@ impl Desktop {
                                         );
                                     });
                                     values.tap_position = Some(position);
+                                }
+                                if let Some((voltage, positive, negative, zero)) = source {
+                                    let mut enabled = values.source.is_some();
+                                    if ui
+                                        .checkbox(
+                                            &mut enabled,
+                                            "Surcharger les hypothèses de source",
+                                        )
+                                        .changed()
+                                    {
+                                        values.source = enabled.then_some(SourceOverride {
+                                            voltage_pu: Some(voltage),
+                                            positive_sequence_ohm: positive,
+                                            negative_sequence_ohm: negative,
+                                            zero_sequence_ohm: zero,
+                                        });
+                                    }
+                                    if let Some(source) = &mut values.source {
+                                        ui.indent(("source_override", id), |ui| {
+                                            let mut voltage_pu =
+                                                source.voltage_pu.unwrap_or(voltage);
+                                            numeric(ui, "Tension source (pu)", &mut voltage_pu);
+                                            source.voltage_pu = Some(voltage_pu);
+                                            optional_impedance(
+                                                ui,
+                                                "Impédance directe Z1",
+                                                &mut source.positive_sequence_ohm,
+                                                positive,
+                                            );
+                                            optional_impedance(
+                                                ui,
+                                                "Impédance inverse Z2",
+                                                &mut source.negative_sequence_ohm,
+                                                negative,
+                                            );
+                                            optional_impedance(
+                                                ui,
+                                                "Impédance homopolaire Z0",
+                                                &mut source.zero_sequence_ohm,
+                                                zero,
+                                            );
+                                        });
+                                    }
                                 }
                             });
                         }
@@ -2825,6 +2906,7 @@ mod tests {
                 in_service: None,
                 switch_closed: None,
                 tap_position: Some(1),
+                source: None,
             },
         );
         let operating_id = operating.id;

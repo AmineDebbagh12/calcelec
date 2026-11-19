@@ -3,7 +3,7 @@ use calcelec::{
     model::rural_example,
     project::Project,
     reference_cases,
-    scenario::{EquipmentOverride, InjectionOverride, Scenario, ScenarioKind},
+    scenario::{EquipmentOverride, InjectionOverride, Scenario, ScenarioKind, SourceOverride},
     screening::{self, Limits, MetricKind, ScreeningStatus},
     short_circuit::{
         Options as FaultOptions, ProtectionRequirement, ResidualCriterion, ResidualRequirement,
@@ -294,6 +294,7 @@ fn fault_screening_recomputes_operating_variants_but_not_pq_only_scenarios() {
             in_service: Some(false),
             switch_closed: None,
             tap_position: None,
+            source: None,
         },
     );
     let scenarios = vec![pq_only, unavailable.clone()];
@@ -314,4 +315,49 @@ fn fault_screening_recomputes_operating_variants_but_not_pq_only_scenarios() {
     assert_eq!(fault.cases[0].scenario_id, None);
     assert_eq!(fault.cases[1].scenario_id, Some(unavailable.id));
     assert_eq!(fault.cases[1].status, ScreeningStatus::Unable);
+}
+
+#[test]
+fn source_strength_scenario_changes_the_fault_case_values() {
+    let project = Project::new(reference_cases::rural_unbalanced()).unwrap();
+    let source = project
+        .network()
+        .unwrap()
+        .objects
+        .values()
+        .find(|object| matches!(object.equipment, calcelec::model::Equipment::Source { .. }))
+        .unwrap()
+        .id;
+    let mut weak_source = scenario("Pcc minimale", 1.0, 1.0);
+    weak_source.equipment.insert(
+        source,
+        EquipmentOverride {
+            in_service: None,
+            switch_closed: None,
+            tap_position: None,
+            source: Some(SourceOverride {
+                voltage_pu: Some(0.98),
+                positive_sequence_ohm: Some(calcelec::electrical::Impedance { r: 0.8, x: 3.2 }),
+                negative_sequence_ohm: Some(calcelec::electrical::Impedance { r: 0.8, x: 3.2 }),
+                zero_sequence_ohm: Some(calcelec::electrical::Impedance { r: 1.6, x: 6.4 }),
+            }),
+        },
+    );
+    let report = screening::screen_unbalanced(
+        &project,
+        std::slice::from_ref(&weak_source),
+        true,
+        &unbalanced::Options::default(),
+        &Limits::default(),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let report =
+        screening::add_fault_studies(report, &project, &[weak_source], &FaultOptions::default());
+    let cases = &report.fault_study.unwrap().cases;
+    assert_eq!(cases.len(), 2);
+    assert!(
+        cases[1].result.as_ref().unwrap().minimum_icc_b_a
+            < cases[0].result.as_ref().unwrap().minimum_icc_b_a
+    );
 }

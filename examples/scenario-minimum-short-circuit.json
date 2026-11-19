@@ -1,0 +1,17 @@
+{
+  "id": "10000000-0000-4000-8000-000000000004",
+  "name": "Puissance de court-circuit minimale — démonstration",
+  "kind": "custom",
+  "load_scale": 1.0,
+  "generation_scale": 1.0,
+  "equipment": {
+    "e777f531-91cb-4d1e-9411-8f981368d752": {
+      "source": {
+        "voltage_pu": 0.98,
+        "positive_sequence_ohm": { "r": 0.8, "x": 3.2 },
+        "negative_sequence_ohm": { "r": 0.8, "x": 3.2 },
+        "zero_sequence_ohm": { "r": 1.6, "x": 6.4 }
+      }
+    }
+  }
+}

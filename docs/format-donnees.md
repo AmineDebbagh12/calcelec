@@ -204,7 +204,9 @@ Les scénarios de charge et production sont des documents d'étude séparés du
 schéma 4. Leur identifiant, leur type, deux coefficients globaux et leurs rares
 exceptions P/Q/état forment un format compact. La table `equipment`, absente
 des anciens fichiers, ajoute des modifications clairsemées `in_service`,
-`switch_closed` et `tap_position`, indexées par UUID d'ouvrage. L'application produit une copie
+`switch_closed` et `tap_position`, indexées par UUID d'ouvrage. Une surcharge
+`source` peut fixer la tension en pu et Z1/Z2/Z0 en ohms pour les scénarios de
+puissance de court-circuit. L'application produit une copie
 de calcul sans ajouter de lot à l'historique du réseau. Le résultat contient le
 scénario complet, `project_id` et `network_version`, ce qui interdit d'attribuer
 silencieusement un résultat à une autre version. Voir

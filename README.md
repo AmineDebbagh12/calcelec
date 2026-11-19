@@ -8,7 +8,7 @@ HTA/BT, avec la France et Enedis comme référence métier.
 les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT.
 Un premier moteur radial de court-circuit publie IccBmin, 3I0 et les marges de
 protection ; son périmètre IEC 60909 reste à étendre.**
-La version de développement courante est **V0.18.1**.
+La version de développement courante est **V0.18**.
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -71,10 +71,16 @@ les options et la version du moteur.
 L'enregistrement SQLite conserve atomiquement la collection avec le réseau et
 son historique. Toute la collection peut aussi être transférée dans un fichier
 JSON lié à l'identifiant du projet et à sa version exacte.
-Depuis la V0.18, la rubrique **États d'exploitation** peut aussi mettre un
+Depuis la V0.17.1, la rubrique **États d'exploitation** peut aussi mettre un
 ouvrage en/hors service, ouvrir ou fermer un interrupteur et choisir la prise
 d'un transformateur déclaré. Ces exceptions restent dans le scénario compact
 et ne modifient pas la version du réseau.
+En V0.18, la même rubrique peut surcharger la tension de la source et ses
+impédances directe Z1, inverse Z2 et homopolaire Z0. Ces hypothèses permettent
+de représenter des puissances de court-circuit amont différentes selon le
+scénario : la tension en pu agit sur le régime permanent, tandis que Z1/Z2/Z0
+influencent directement IccBmin et 3I0. Le facteur `cmin` reste une option
+explicite de l'étude de défaut.
 
 Le bouton **Vérifier toutes les situations** calcule toute la collection (et,
 au choix, le réseau de base). Il ne compare pas les scénarios deux à deux : il
@@ -263,6 +269,7 @@ cargo run -- --unbalanced-load-flow examples/reference-rural-unbalanced.json
 cargo run -- --topology examples/reference-rural-meshed.json
 cargo run -- --unbalanced-load-flow examples/reference-rural-meshed.json
 cargo run -- --scenario-unbalanced-load-flow examples/reference-rural-unbalanced.json examples/scenario-maximum-consumption.json
+cargo run -- --scenario-short-circuit examples/reference-rural-unbalanced.json examples/scenario-minimum-short-circuit.json examples/fault-study-rural.json
 cargo run -- --short-circuit examples/reference-rural-unbalanced.json examples/fault-study-rural.json
 ```
 

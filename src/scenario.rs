@@ -1,7 +1,7 @@
 //! Compact, shareable operating scenarios applied without mutating a project version.
 use crate::project::Project;
 use crate::{
-    electrical::ElectricalData,
+    electrical::{ElectricalData, Impedance},
     model::{Equipment, Error, Id, Network, Result},
 };
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,21 @@ pub struct EquipmentOverride {
     pub switch_closed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tap_position: Option<i16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceOverride>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voltage_pu: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub positive_sequence_ohm: Option<Impedance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub negative_sequence_ohm: Option<Impedance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zero_sequence_ohm: Option<Impedance>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -113,6 +128,7 @@ impl Scenario {
             if values.in_service.is_none()
                 && values.switch_closed.is_none()
                 && values.tap_position.is_none()
+                && values.source.is_none()
             {
                 return Err(Error::Invalid(format!(
                     "{} : modification d'exploitation vide",
@@ -147,6 +163,53 @@ impl Scenario {
                     )));
                 }
             }
+            if let Some(source) = &values.source {
+                let Equipment::Source { .. } = object.equipment else {
+                    return Err(Error::Invalid(format!(
+                        "{} : les hypothèses de source ne s'appliquent qu'à une source",
+                        object.name
+                    )));
+                };
+                if source.voltage_pu.is_none()
+                    && source.positive_sequence_ohm.is_none()
+                    && source.negative_sequence_ohm.is_none()
+                    && source.zero_sequence_ohm.is_none()
+                {
+                    return Err(Error::Invalid(format!(
+                        "{} : hypothèse de source vide",
+                        object.name
+                    )));
+                }
+                if source
+                    .voltage_pu
+                    .is_some_and(|value| !value.is_finite() || value <= 0.0 || value > 1.2)
+                {
+                    return Err(Error::Invalid(format!(
+                        "{} : tension de source en pu invalide",
+                        object.name
+                    )));
+                }
+                for impedance in [
+                    source.positive_sequence_ohm,
+                    source.negative_sequence_ohm,
+                    source.zero_sequence_ohm,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    impedance.validate()?;
+                }
+                if (source.positive_sequence_ohm.is_some()
+                    || source.negative_sequence_ohm.is_some()
+                    || source.zero_sequence_ohm.is_some())
+                    && !matches!(object.electrical, Some(ElectricalData::Source(_)))
+                {
+                    return Err(Error::Invalid(format!(
+                        "{} : données détaillées requises pour surcharger les impédances de source",
+                        object.name
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -177,6 +240,35 @@ impl Scenario {
                     unreachable!("validated transformer tap override")
                 };
                 data.tap.as_mut().expect("validated tap changer").position = position;
+            }
+            if let Some(source) = &values.source {
+                if let Some(voltage_pu) = source.voltage_pu {
+                    let Equipment::Source {
+                        voltage_pu: current,
+                        ..
+                    } = &mut object.equipment
+                    else {
+                        unreachable!("validated source override")
+                    };
+                    *current = voltage_pu;
+                }
+                if source.positive_sequence_ohm.is_some()
+                    || source.negative_sequence_ohm.is_some()
+                    || source.zero_sequence_ohm.is_some()
+                {
+                    let Some(ElectricalData::Source(data)) = &mut object.electrical else {
+                        unreachable!("validated detailed source override")
+                    };
+                    if let Some(value) = source.positive_sequence_ohm {
+                        data.positive_sequence_ohm = Some(value);
+                    }
+                    if let Some(value) = source.negative_sequence_ohm {
+                        data.negative_sequence_ohm = Some(value);
+                    }
+                    if let Some(value) = source.zero_sequence_ohm {
+                        data.zero_sequence_ohm = Some(value);
+                    }
+                }
             }
         }
         for object in result.objects.values_mut() {

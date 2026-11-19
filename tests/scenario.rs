@@ -4,7 +4,10 @@ use calcelec::{
     model::{Equipment, Object},
     project::Project,
     reference_cases,
-    scenario::{EquipmentOverride, InjectionOverride, Scenario, ScenarioCollection, ScenarioKind},
+    scenario::{
+        EquipmentOverride, InjectionOverride, Scenario, ScenarioCollection, ScenarioKind,
+        SourceOverride,
+    },
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -142,6 +145,7 @@ fn operating_overrides_change_service_and_tap_only_in_the_study_copy() {
                 in_service: Some(false),
                 switch_closed: None,
                 tap_position: None,
+                source: None,
             },
         )]),
     };
@@ -172,6 +176,7 @@ fn operating_overrides_change_service_and_tap_only_in_the_study_copy() {
             in_service: None,
             switch_closed: None,
             tap_position: Some(target),
+            source: None,
         },
     )]);
     let applied = operating.apply(&transformer_network).unwrap();
@@ -205,6 +210,7 @@ fn operating_override_rejects_fields_for_the_wrong_equipment_kind() {
                 in_service: None,
                 switch_closed: Some(false),
                 tap_position: None,
+                source: None,
             },
         )]),
     };
@@ -257,6 +263,7 @@ fn operating_override_opens_and_closes_a_switch_without_changing_the_base() {
                 in_service: None,
                 switch_closed: Some(true),
                 tap_position: None,
+                source: None,
             },
         )]),
     };
@@ -269,4 +276,67 @@ fn operating_override_opens_and_closes_a_switch_without_changing_the_base() {
         applied.objects[&switch_id].equipment,
         Equipment::Switch { closed: true, .. }
     ));
+}
+
+#[test]
+fn source_hypothesis_changes_voltage_and_sequence_impedances_in_the_study_copy() {
+    let network = reference_cases::rural_unbalanced();
+    let source = network
+        .objects
+        .values()
+        .find(|object| matches!(object.equipment, Equipment::Source { .. }))
+        .unwrap();
+    let override_values = SourceOverride {
+        voltage_pu: Some(0.98),
+        positive_sequence_ohm: Some(calcelec::electrical::Impedance { r: 0.8, x: 3.2 }),
+        negative_sequence_ohm: Some(calcelec::electrical::Impedance { r: 0.8, x: 3.2 }),
+        zero_sequence_ohm: Some(calcelec::electrical::Impedance { r: 1.6, x: 6.4 }),
+    };
+    let scenario = Scenario {
+        id: Uuid::new_v4(),
+        name: "Pcc minimale".into(),
+        kind: ScenarioKind::Custom,
+        load_scale: 1.0,
+        generation_scale: 1.0,
+        injections: BTreeMap::new(),
+        equipment: BTreeMap::from([(
+            source.id,
+            EquipmentOverride {
+                in_service: None,
+                switch_closed: None,
+                tap_position: None,
+                source: Some(override_values.clone()),
+            },
+        )]),
+    };
+    let applied = scenario.apply(&network).unwrap();
+    assert!(matches!(
+        applied.objects[&source.id].equipment,
+        Equipment::Source {
+            voltage_pu: 0.98,
+            ..
+        }
+    ));
+    let Some(ElectricalData::Source(applied_data)) = &applied.objects[&source.id].electrical else {
+        unreachable!()
+    };
+    assert_eq!(
+        applied_data.positive_sequence_ohm,
+        override_values.positive_sequence_ohm
+    );
+    let Some(ElectricalData::Source(base_data)) = &source.electrical else {
+        unreachable!()
+    };
+    assert_ne!(
+        base_data.positive_sequence_ohm,
+        applied_data.positive_sequence_ohm
+    );
+
+    let base_fault =
+        calcelec::short_circuit::solve(&network, &calcelec::short_circuit::Options::default())
+            .unwrap();
+    let scenario_fault =
+        calcelec::short_circuit::solve(&applied, &calcelec::short_circuit::Options::default())
+            .unwrap();
+    assert!(scenario_fault.minimum_icc_b_a < base_fault.minimum_icc_b_a);
 }

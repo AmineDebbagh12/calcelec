@@ -23,6 +23,22 @@ avant toute application. Le réseau versionné reste inchangé : le solveur reç
 une copie d'étude. Le fichier
 `examples/scenario-transformer-tap.json` fournit un exemple compact.
 
+Depuis la V0.18, un état de source peut en plus surcharger `voltage_pu` et les
+impédances de séquence `positive_sequence_ohm`, `negative_sequence_ohm` et
+`zero_sequence_ohm`. Les valeurs sont validées en ohms et appliquées à la copie
+d'étude avant le calcul. La tension en pu est utilisée en régime permanent ; les
+impédances sont utilisées par le moteur Icc, dont `voltage_factor_min` reste une
+option propre. Le fichier
+`examples/scenario-minimum-short-circuit.json` illustre une hypothèse amont plus
+faible produisant des courants de défaut minimaux plus bas.
+
+```sh
+cargo run -- --scenario-short-circuit \
+  examples/reference-rural-unbalanced.json \
+  examples/scenario-minimum-short-circuit.json \
+  examples/fault-study-rural.json
+```
+
 ```json
 {
   "id": "10000000-0000-4000-8000-000000000001",
@@ -106,11 +122,11 @@ et de charge.
 Depuis la V0.17, l'interface peut joindre au verdict l'étude IccBmin/3I0 et ses
 marges de protection. Les paramètres sont chargés depuis le JSON d'options du
 moteur de défaut. Le réseau de base couvre les scénarios P/Q purs, puisque le
-moteur néglige encore charges et contributions des producteurs. Depuis la V0.18,
+moteur néglige encore charges et contributions des producteurs. Depuis la V0.17.1,
 chaque scénario modifiant un interrupteur, l'état de service ou une prise est en
 revanche recalculé séparément pour le défaut. Un critère 3I0 demandé mais non
 calculable rend le verdict global incomplet, jamais conforme.
 
-Les prochains ajouts seront les hypothèses de source et de puissance de
-court-circuit par scénario. La fusion concurrente de deux
-collections modifiées séparément reste également à définir.
+Les prochains ajouts porteront sur la persistance des rapports et les exports.
+La fusion concurrente de deux collections modifiées séparément reste également
+à définir.

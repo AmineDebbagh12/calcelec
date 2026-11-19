@@ -11,6 +11,12 @@ use calcelec::{
 
 fn command(args: &[String]) -> Result<()> {
     match args {
+        [cmd, project_path, scenario_path] if cmd == "--scenario-short-circuit" => {
+            run_scenario_short_circuit(project_path, scenario_path, None)?
+        }
+        [cmd, project_path, scenario_path, options_path] if cmd == "--scenario-short-circuit" => {
+            run_scenario_short_circuit(project_path, scenario_path, Some(options_path.as_str()))?
+        }
         [cmd, path] if cmd == "--short-circuit" => {
             let project = storage::read_project(path)?;
             let report = calcelec::short_circuit::study(
@@ -128,14 +134,43 @@ fn command(args: &[String]) -> Result<()> {
             storage::export_new(output, &project.to_json()?)?;
             println!("Version reconstruite : {}", project.head());
         }
-        _ => println!(
-            "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --topology projet.json  Diagnostic de la topologie d'exploitation\n  cargo run -- --apply base.json lot.json résultat.json\n  cargo run -- --load-flow projet.json [--simplified]  Calcul AC radial, résultats JSON sur stdout\n  cargo run -- --unbalanced-load-flow projet.json  Calcul AC ABC/ABCN radial ou faiblement maillé\n  cargo run -- --scenario-load-flow projet.json scénario.json [--simplified]\n  cargo run -- --scenario-unbalanced-load-flow projet.json scénario.json\n  cargo run -- --short-circuit projet.json [paramètres.json]  IccBmin, 3I0 et marges de protection\n  cargo run -- --reference-case four-wire|transformer|dyn-transformer|yzn-transformer|dyn-grounded|unbalanced-bt|grounded-bt|source-grounded-bt|rural-unbalanced|rural-meshed projet.json\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
-        ),
+        _ => {
+            println!(
+                "CalcElec\n  cargo run                          Application de bureau\n  cargo run -- --example projet.json Créer l'exemple rural\n  cargo run -- --check projet.json   Vérifier un projet\n  cargo run -- --topology projet.json  Diagnostic de la topologie d'exploitation\n  cargo run -- --apply base.json lot.json résultat.json\n  cargo run -- --load-flow projet.json [--simplified]  Calcul AC radial, résultats JSON sur stdout\n  cargo run -- --unbalanced-load-flow projet.json  Calcul AC ABC/ABCN radial ou faiblement maillé\n  cargo run -- --scenario-load-flow projet.json scénario.json [--simplified]\n  cargo run -- --scenario-unbalanced-load-flow projet.json scénario.json\n  cargo run -- --short-circuit projet.json [paramètres.json]  IccBmin, 3I0 et marges de protection\n  cargo run -- --reference-case four-wire|transformer|dyn-transformer|yzn-transformer|dyn-grounded|unbalanced-bt|grounded-bt|source-grounded-bt|rural-unbalanced|rural-meshed projet.json\nLes exports créent de nouveaux fichiers et refusent de remplacer un fichier existant."
+            );
+            println!(
+                "  cargo run -- --scenario-short-circuit projet.json scénario.json [paramètres.json]"
+            );
+        }
     }
     Ok(())
 }
 fn read_scenario(path: &str) -> Result<calcelec::scenario::Scenario> {
     Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
+}
+fn run_scenario_short_circuit(
+    project_path: &str,
+    scenario_path: &str,
+    options_path: Option<&str>,
+) -> Result<()> {
+    let project = storage::read_project(project_path)?;
+    let scenario = read_scenario(scenario_path)?;
+    let network = scenario.apply(&project.network()?)?;
+    let options = match options_path {
+        Some(path) => serde_json::from_str(&std::fs::read_to_string(path)?)?,
+        None => calcelec::short_circuit::Options::default(),
+    };
+    let result = calcelec::short_circuit::solve(&network, &options)?;
+    let report = calcelec::scenario::ScenarioStudy {
+        project_id: project.id,
+        network_version: project.head(),
+        scenario,
+        solver_version: calcelec::short_circuit::SOLVER_VERSION.into(),
+        options,
+        result,
+    };
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
 }
 fn run_scenario_load_flow(project_path: &str, scenario_path: &str, simplified: bool) -> Result<()> {
     let project = storage::read_project(project_path)?;
