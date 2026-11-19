@@ -244,6 +244,7 @@ fn sqlite_persists_a_version_bound_scenario_collection_with_the_project() {
         load_scale: 0.3,
         generation_scale: 1.0,
         injections: BTreeMap::new(),
+        equipment: BTreeMap::new(),
     }];
     {
         let mut store = Store::open(&path).unwrap();
@@ -268,6 +269,7 @@ fn invalid_scenario_collection_rolls_back_the_atomic_workspace_save() {
         load_scale: 1.0,
         generation_scale: 1.0,
         injections: BTreeMap::new(),
+        equipment: BTreeMap::new(),
     };
     {
         let mut store = Store::open(&path).unwrap();

@@ -3,8 +3,11 @@ use calcelec::{
     model::rural_example,
     project::Project,
     reference_cases,
-    scenario::{InjectionOverride, Scenario, ScenarioKind},
+    scenario::{EquipmentOverride, InjectionOverride, Scenario, ScenarioKind},
     screening::{self, Limits, MetricKind, ScreeningStatus},
+    short_circuit::{
+        Options as FaultOptions, ProtectionRequirement, ResidualCriterion, ResidualRequirement,
+    },
     unbalanced,
 };
 use std::{
@@ -21,6 +24,7 @@ fn scenario(name: &str, load_scale: f64, generation_scale: f64) -> Scenario {
         load_scale,
         generation_scale,
         injections: BTreeMap::new(),
+        equipment: BTreeMap::new(),
     }
 }
 
@@ -170,4 +174,144 @@ fn balanced_screening_uses_explicit_simplified_options_and_honours_cancellation(
         .contains("annulé")
     );
     assert!(cancelled.load(Ordering::Relaxed));
+}
+
+#[test]
+fn fault_requirements_join_the_global_verdict_without_fake_pq_provenance() {
+    let project = Project::new(reference_cases::rural_unbalanced()).unwrap();
+    let network = project.network().unwrap();
+    let hta_bus = network
+        .objects
+        .values()
+        .find(|object| object.name == "Poste rural 3 — HTA")
+        .unwrap()
+        .id;
+    let report = screening::screen_unbalanced(
+        &project,
+        &[scenario("Production maximale", 0.3, 1.0)],
+        false,
+        &unbalanced::Options::default(),
+        &Limits {
+            min_voltage_pu: 0.001,
+            max_voltage_pu: 100.0,
+            max_loading_percent: 1.0e9,
+            max_negative_sequence_percent: None,
+            max_neutral_displacement_v: None,
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let report = screening::add_fault_study(
+        report,
+        &project,
+        &FaultOptions {
+            protection_requirements: vec![ProtectionRequirement {
+                name: "Départ producteur".into(),
+                bus_id: hta_bus,
+                minimum_icc_b_a: Some(100_000.0),
+                residual: Some(ResidualRequirement {
+                    criterion: ResidualCriterion::MaximumAdmissible,
+                    threshold_a: 1.0,
+                }),
+            }],
+            ..FaultOptions::default()
+        },
+    );
+
+    assert_eq!(report.status, ScreeningStatus::Constrained);
+    assert_eq!(
+        report.fault_study.as_ref().unwrap().status,
+        ScreeningStatus::Constrained
+    );
+    assert!(report.dimensioning_cases.iter().any(|case| {
+        case.metric == MetricKind::MinimumShortCircuit
+            && case.scenario_name == "Réseau de base"
+            && case.scenario_id.is_none()
+            && case.constrained
+    }));
+}
+
+#[test]
+fn unavailable_three_i0_prevents_a_compliant_fault_verdict() {
+    let project = Project::new(reference_cases::rural_unbalanced()).unwrap();
+    let terminal = project
+        .network()
+        .unwrap()
+        .objects
+        .values()
+        .find(|object| object.name == "Extrémité départ BT")
+        .unwrap()
+        .id;
+    let report = screening::screen_unbalanced(
+        &project,
+        &[],
+        true,
+        &unbalanced::Options::default(),
+        &Limits::default(),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let report = screening::add_fault_study(
+        report,
+        &project,
+        &FaultOptions {
+            protection_requirements: vec![ProtectionRequirement {
+                name: "Protection BT".into(),
+                bus_id: terminal,
+                minimum_icc_b_a: None,
+                residual: Some(ResidualRequirement {
+                    criterion: ResidualCriterion::MaximumAdmissible,
+                    threshold_a: 2_500.0,
+                }),
+            }],
+            ..FaultOptions::default()
+        },
+    );
+
+    assert_eq!(report.status, ScreeningStatus::Unable);
+    assert_eq!(
+        report.fault_study.as_ref().unwrap().status,
+        ScreeningStatus::Unable
+    );
+}
+
+#[test]
+fn fault_screening_recomputes_operating_variants_but_not_pq_only_scenarios() {
+    let project = Project::new(reference_cases::rural_unbalanced()).unwrap();
+    let line = project
+        .network()
+        .unwrap()
+        .objects
+        .values()
+        .find(|object| matches!(object.equipment, calcelec::model::Equipment::Line { .. }))
+        .unwrap()
+        .id;
+    let pq_only = scenario("P/Q uniquement", 1.2, 0.0);
+    let mut unavailable = scenario("Tronçon indisponible", 1.0, 1.0);
+    unavailable.equipment.insert(
+        line,
+        EquipmentOverride {
+            in_service: Some(false),
+            switch_closed: None,
+            tap_position: None,
+        },
+    );
+    let scenarios = vec![pq_only, unavailable.clone()];
+    let report = screening::screen_unbalanced(
+        &project,
+        &scenarios,
+        true,
+        &unbalanced::Options::default(),
+        &Limits::default(),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let report =
+        screening::add_fault_studies(report, &project, &scenarios, &FaultOptions::default());
+    let fault = report.fault_study.unwrap();
+
+    assert_eq!(fault.cases.len(), 2);
+    assert_eq!(fault.cases[0].scenario_id, None);
+    assert_eq!(fault.cases[1].scenario_id, Some(unavailable.id));
+    assert_eq!(fault.cases[1].status, ScreeningStatus::Unable);
 }

@@ -5,7 +5,7 @@ use calcelec::load_flow::{self, Options, StudyResult};
 use calcelec::{
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
-    scenario::{InjectionOverride, Scenario, ScenarioCollection, ScenarioKind},
+    scenario::{EquipmentOverride, InjectionOverride, Scenario, ScenarioCollection, ScenarioKind},
     screening::{self, MetricKind, ScreeningReport, ScreeningStatus},
     storage::{self, Store},
 };
@@ -30,6 +30,9 @@ fn metric_label(metric: MetricKind) -> &'static str {
         MetricKind::MaximumLoading => "Charge maximale",
         MetricKind::NegativeSequence => "Taux de tension inverse",
         MetricKind::NeutralDisplacement => "Déplacement du neutre",
+        MetricKind::MinimumShortCircuit => "IccBmin minimal",
+        MetricKind::MinimumResidualDetection => "3I0 minimal de détection",
+        MetricKind::MaximumResidualCurrent => "3I0 maximal admissible",
     }
 }
 fn scenario_template(name: &str, kind: ScenarioKind, load: f64, generation: f64) -> Scenario {
@@ -40,6 +43,7 @@ fn scenario_template(name: &str, kind: ScenarioKind, load: f64, generation: f64)
         load_scale: load,
         generation_scale: generation,
         injections: BTreeMap::new(),
+        equipment: BTreeMap::new(),
     }
 }
 fn default_scenarios() -> Vec<Scenario> {
@@ -145,6 +149,9 @@ pub struct Desktop {
     screening_report: Option<ScreeningReport>,
     screening_limits: screening::Limits,
     screening_include_base: bool,
+    screening_include_faults: bool,
+    fault_options: calcelec::short_circuit::Options,
+    fault_options_path: String,
     use_unbalanced: bool,
     calculation: Option<CalculationTask>,
     simplified_calculation: bool,
@@ -194,6 +201,9 @@ impl Desktop {
             screening_report: None,
             screening_limits: screening::Limits::default(),
             screening_include_base: true,
+            screening_include_faults: false,
+            fault_options: calcelec::short_circuit::Options::default(),
+            fault_options_path: "examples/fault-study-rural.json".into(),
             use_unbalanced: false,
             calculation: None,
             simplified_calculation: false,
@@ -721,6 +731,86 @@ impl Desktop {
                     }
                 },
             );
+            ui.collapsing(
+                format!("États d'exploitation ({})", edited.equipment.len()),
+                |ui| {
+                    let mut candidates: Vec<_> = self
+                        .network
+                        .objects
+                        .values()
+                        .filter_map(|object| {
+                            if matches!(
+                                object.equipment,
+                                Equipment::Load { .. }
+                                    | Equipment::Generator { .. }
+                                    | Equipment::Bus { .. }
+                            ) {
+                                return None;
+                            }
+                            let closed = match object.equipment {
+                                Equipment::Switch { closed, .. } => Some(closed),
+                                _ => None,
+                            };
+                            let tap = match &object.electrical {
+                                Some(calcelec::electrical::ElectricalData::Transformer(data)) => {
+                                    data.tap.as_ref().map(|tap| {
+                                        (tap.position, tap.min_position, tap.max_position)
+                                    })
+                                }
+                                _ => None,
+                            };
+                            Some((
+                                object.id,
+                                object.name.clone(),
+                                object.in_service,
+                                closed,
+                                tap,
+                            ))
+                        })
+                        .collect();
+                    candidates.sort_by(|left, right| left.1.cmp(&right.1));
+                    for (id, name, in_service, closed, tap) in candidates {
+                        let mut enabled = edited.equipment.contains_key(&id);
+                        if ui.checkbox(&mut enabled, name).changed() {
+                            if enabled {
+                                edited.equipment.insert(
+                                    id,
+                                    EquipmentOverride {
+                                        in_service: Some(in_service),
+                                        switch_closed: closed,
+                                        tap_position: tap.map(|value| value.0),
+                                    },
+                                );
+                            } else {
+                                edited.equipment.remove(&id);
+                            }
+                        }
+                        if let Some(values) = edited.equipment.get_mut(&id) {
+                            ui.indent(("operating_state", id), |ui| {
+                                let mut service = values.in_service.unwrap_or(in_service);
+                                ui.checkbox(&mut service, "En service");
+                                values.in_service = Some(service);
+                                if let Some(default) = closed {
+                                    let mut value = values.switch_closed.unwrap_or(default);
+                                    ui.checkbox(&mut value, "Interrupteur fermé");
+                                    values.switch_closed = Some(value);
+                                }
+                                if let Some((default, minimum, maximum)) = tap {
+                                    let mut position = values.tap_position.unwrap_or(default);
+                                    ui.horizontal(|ui| {
+                                        ui.label("Position de prise");
+                                        ui.add(
+                                            egui::DragValue::new(&mut position)
+                                                .range(minimum..=maximum),
+                                        );
+                                    });
+                                    values.tap_position = Some(position);
+                                }
+                            });
+                        }
+                    }
+                },
+            );
             match edited.validate(&self.network) {
                 Ok(()) => ui.small("Scénario valide pour le réseau courant."),
                 Err(error) => ui.colored_label(Color32::LIGHT_RED, error.to_string()),
@@ -825,6 +915,31 @@ impl Desktop {
             "Charge maximale (%)",
             &mut self.screening_limits.max_loading_percent,
         );
+        ui.checkbox(
+            &mut self.screening_include_faults,
+            "Inclure IccBmin et 3I0 dans le verdict",
+        );
+        if self.screening_include_faults {
+            ui.small("Le réseau de base couvre les scénarios P/Q purs ; les scénarios modifiant l'exploitation sont recalculés séparément. Les contributions des producteurs restent hors du moteur actuel.");
+            ui.text_edit_singleline(&mut self.fault_options_path);
+            if ui.button("Charger les seuils de protection").clicked() {
+                let result = (|| -> Result<String> {
+                    let options =
+                        serde_json::from_str(&std::fs::read_to_string(&self.fault_options_path)?)?;
+                    self.fault_options = options;
+                    Ok(format!(
+                        "Paramètres de défaut chargés : {} protection(s).",
+                        self.fault_options.protection_requirements.len()
+                    ))
+                })();
+                self.report(result);
+            }
+            ui.small(format!(
+                "cmin {:.3} · {} exigence(s) de protection",
+                self.fault_options.voltage_factor_min,
+                self.fault_options.protection_requirements.len()
+            ));
+        }
         if ui
             .add_enabled(
                 self.calculation.is_none()
@@ -851,6 +966,8 @@ impl Desktop {
         let limits = self.screening_limits.clone();
         let include_base = self.screening_include_base;
         let use_unbalanced = self.use_unbalanced;
+        let include_faults = self.screening_include_faults;
+        let fault_options = self.fault_options.clone();
         let balanced_options = if self.simplified_calculation {
             Options::simplified()
         } else {
@@ -893,6 +1010,13 @@ impl Desktop {
                     &worker_cancel,
                 )
             }
+            .map(|report| {
+                if include_faults {
+                    screening::add_fault_studies(report, &project, &scenarios, &fault_options)
+                } else {
+                    report
+                }
+            })
             .map(CalculationResult::Screening)
             .map_err(|error| error.to_string());
             let _ = sender.send(result);
@@ -1053,17 +1177,33 @@ impl Desktop {
                     .iter()
                     .filter(|case| case.status == ScreeningStatus::Unable)
                     .count();
+                let fault_status = report.fault_study.as_ref().map(|fault| fault.status);
                 self.status = match report.status {
                     ScreeningStatus::Compliant => format!(
-                        "Vérification terminée : {} situation(s), aucune contrainte.",
-                        report.scenarios.len()
+                        "Vérification terminée : {} situation(s), aucune contrainte{}.",
+                        report.scenarios.len(),
+                        if fault_status.is_some() {
+                            " de régime permanent ou de protection"
+                        } else {
+                            ""
+                        }
                     ),
                     ScreeningStatus::Constrained => format!(
-                        "Vérification terminée : {constrained} situation(s) en contrainte sur {}.",
-                        report.scenarios.len()
+                        "Vérification terminée : {constrained} situation(s) en contrainte sur {}{}.",
+                        report.scenarios.len(),
+                        if fault_status == Some(ScreeningStatus::Constrained) {
+                            " ; contraintes de protection détectées"
+                        } else {
+                            ""
+                        }
                     ),
                     ScreeningStatus::Unable => format!(
-                        "Vérification incomplète : {unable} situation(s) non calculable(s), {constrained} en contrainte."
+                        "Vérification incomplète : {unable} situation(s) non calculable(s), {constrained} en contrainte{}.",
+                        if fault_status == Some(ScreeningStatus::Unable) {
+                            " ; étude de protection incomplète"
+                        } else {
+                            ""
+                        }
                     ),
                 };
                 self.error = report.status != ScreeningStatus::Compliant;
@@ -1464,10 +1604,7 @@ impl Desktop {
                 Color32::LIGHT_GREEN,
             ),
             ScreeningStatus::Constrained => ("RÉSEAU EN CONTRAINTE", Color32::LIGHT_RED),
-            ScreeningStatus::Unable => (
-                "VERDICT INCOMPLET — SITUATION NON CALCULABLE",
-                Color32::YELLOW,
-            ),
+            ScreeningStatus::Unable => ("VERDICT INCOMPLET — CALCUL MANQUANT", Color32::YELLOW),
         };
         ui.heading("Vérification multi-situations");
         ui.colored_label(color, label);
@@ -1536,6 +1673,82 @@ impl Desktop {
                     ui.end_row();
                 }
             });
+
+        if let Some(fault) = &report.fault_study {
+            ui.separator();
+            ui.strong("Protections — IccBmin et 3I0");
+            let (label, color) = match fault.status {
+                ScreeningStatus::Compliant => ("Conforme", Color32::LIGHT_GREEN),
+                ScreeningStatus::Constrained => ("Contrainte", Color32::LIGHT_RED),
+                ScreeningStatus::Unable => ("Non calculable complètement", Color32::YELLOW),
+            };
+            ui.colored_label(color, label);
+            ui.small("Le réseau de base couvre aussi les scénarios P/Q purs. Chaque scénario qui modifie un interrupteur, l'état d'un ouvrage ou une prise possède son propre calcul de défaut.");
+            egui::Grid::new("screening_fault_cases")
+                .striped(true)
+                .show(ui, |ui| {
+                    for title in [
+                        "Situation",
+                        "Verdict",
+                        "IccBmin réseau",
+                        "3I0 maximal",
+                        "Contraintes",
+                    ] {
+                        ui.strong(title);
+                    }
+                    ui.end_row();
+                    for case in &fault.cases {
+                        ui.label(&case.scenario_name);
+                        let (status, color) = match case.status {
+                            ScreeningStatus::Compliant => ("Conforme", Color32::LIGHT_GREEN),
+                            ScreeningStatus::Constrained => ("Contrainte", Color32::LIGHT_RED),
+                            ScreeningStatus::Unable => ("Non calculable", Color32::YELLOW),
+                        };
+                        ui.colored_label(color, status);
+                        ui.label(case.result.as_ref().map_or_else(
+                            || "—".into(),
+                            |result| format!("{:.2} A", result.minimum_icc_b_a),
+                        ));
+                        ui.label(
+                            case.result
+                                .as_ref()
+                                .and_then(|result| result.maximum_three_i0_a)
+                                .map_or_else(|| "—".into(), |value| format!("{value:.2} A")),
+                        );
+                        ui.label(
+                            case.error
+                                .clone()
+                                .unwrap_or_else(|| case.constraints.len().to_string()),
+                        );
+                        ui.end_row();
+                    }
+                });
+            ui.collapsing("Marges détaillées des protections", |ui| {
+                for case in &fault.cases {
+                    let Some(result) = &case.result else {
+                        continue;
+                    };
+                    ui.strong(&case.scenario_name);
+                    for assessment in &result.protection_assessments {
+                        ui.label(format!(
+                            "{} · IccBmin {:.2} A, marge {} · 3I0 {}, marge {}",
+                            assessment.name,
+                            assessment.icc_b_min_a,
+                            assessment
+                                .icc_b_margin_a
+                                .map_or_else(|| "—".into(), |value| format!("{value:+.2} A"),),
+                            assessment.three_i0_a.map_or_else(
+                                || "non évalué".into(),
+                                |value| format!("{value:.2} A"),
+                            ),
+                            assessment
+                                .residual_margin_a
+                                .map_or_else(|| "—".into(), |value| format!("{value:+.2} A"),)
+                        ));
+                    }
+                }
+            });
+        }
 
         let mut clicked = None;
         ui.separator();
@@ -2573,6 +2786,85 @@ mod tests {
         app.invalidate_scenario_result();
         assert!(app.unbalanced_study.is_none());
         assert!(app.result_scenario.is_none());
+    }
+    #[test]
+    fn screening_worker_integrates_fault_protection_and_renders_the_combined_report() {
+        let mut app = Desktop::new();
+        app.network = calcelec::reference_cases::rural_unbalanced();
+        app.project = Project::new(app.network.clone()).unwrap();
+        app.use_unbalanced = true;
+        app.screening_include_faults = true;
+        let bus_id = app
+            .network
+            .objects
+            .values()
+            .find(|object| object.name == "Poste rural 3 — HTA")
+            .unwrap()
+            .id;
+        app.fault_options.protection_requirements =
+            vec![calcelec::short_circuit::ProtectionRequirement {
+                name: "Départ rural".into(),
+                bus_id,
+                minimum_icc_b_a: Some(2_000.0),
+                residual: Some(calcelec::short_circuit::ResidualRequirement {
+                    criterion: calcelec::short_circuit::ResidualCriterion::MaximumAdmissible,
+                    threshold_a: 2_500.0,
+                }),
+            }];
+        let transformer = app
+            .network
+            .objects
+            .values()
+            .find(|object| object.name == "Transformateur 1")
+            .unwrap()
+            .id;
+        let mut operating = scenario_template("Prise haute", ScenarioKind::Custom, 1.0, 1.0);
+        operating.equipment.insert(
+            transformer,
+            EquipmentOverride {
+                in_service: None,
+                switch_closed: None,
+                tap_position: Some(1),
+            },
+        );
+        let operating_id = operating.id;
+        app.scenarios.push(operating);
+        app.start_screening();
+        for _ in 0..10_000 {
+            app.poll_calculation();
+            if app.calculation.is_none() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        let report = app.screening_report.as_ref().unwrap();
+        assert_eq!(
+            report.fault_study.as_ref().unwrap().status,
+            ScreeningStatus::Compliant
+        );
+        let fault_cases = &report.fault_study.as_ref().unwrap().cases;
+        assert_eq!(fault_cases.len(), 2);
+        assert_eq!(fault_cases[1].scenario_id, Some(operating_id));
+        assert!(
+            report
+                .dimensioning_cases
+                .iter()
+                .any(|case| case.metric == MetricKind::MinimumShortCircuit)
+        );
+
+        let context = egui::Context::default();
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1280.0, 1024.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.render(ui),
+        );
+        assert!(!output.shapes.is_empty());
+        output.textures_delta.clear();
     }
     #[test]
     fn grounding_results_render_with_separate_losses_and_are_invalidated_after_edit() {

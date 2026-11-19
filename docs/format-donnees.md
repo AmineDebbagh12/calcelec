@@ -202,7 +202,9 @@ en charge.
 
 Les scénarios de charge et production sont des documents d'étude séparés du
 schéma 4. Leur identifiant, leur type, deux coefficients globaux et leurs rares
-exceptions P/Q/état forment un format compact. L'application produit une copie
+exceptions P/Q/état forment un format compact. La table `equipment`, absente
+des anciens fichiers, ajoute des modifications clairsemées `in_service`,
+`switch_closed` et `tap_position`, indexées par UUID d'ouvrage. L'application produit une copie
 de calcul sans ajouter de lot à l'historique du réseau. Le résultat contient le
 scénario complet, `project_id` et `network_version`, ce qui interdit d'attribuer
 silencieusement un résultat à une autre version. Voir

@@ -80,6 +80,10 @@ raccordement selon les règles d'un gestionnaire de réseau est hors V1.
   tension et équivalent de court-circuit y sont fournis comme données d'entrée.
 - Décrire les postes HTA/BT, départs aériens et souterrains, branchements et
   points de raccordement avec des paramètres électriques traçables.
+- Représenter avant le catalogue les interrupteurs aériens HTA comme ouvrages
+  géographiques externes. Les interrupteurs situés dans les postes seront
+  ajoutés avec les mondes internes unifilaires, afin de ne pas les confondre
+  avec des objets cartographiques autonomes.
 - Définir explicitement le régime de neutre HTA et les mises à la terre BT
   pour chaque cas de référence avant les calculs de défaut à la terre.
   Leur couverture numérique reste à spécifier, sans valeur universelle implicite.
@@ -424,10 +428,12 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | A bis — Contrat de données | Objets, instantanés, versions et lots documentés | Socle opérationnel ; compacité et montée en charge encore à mesurer |
 | B — Régime permanent équilibré | Moteur utilisable sans interface | Radial opérationnel ; le diagnostic de topologie est partagé, mais le calcul équilibré maillé reste à couvrir |
 | C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial et faiblement maillé, terres multi-zones, neutre source impédant, groupes Dyn/Yzn et cas rural détaillé disponibles ; comparaison pandapower disponible sur le sous-domaine commun, neutre/terre externe et mailles générales à compléter |
-| D — Courts-circuits | Méthode et modèles du périmètre retenu | Première version radiale IccBmin/3I0 et marges de protection disponible ; shunts homopolaires, cas IEC complets, contributions et mailles à ajouter |
-| E — Application V1 | Cas d'étude, résultats, enveloppes et exports | Scénarios P/Q éditables, échangeables et persistés en collection SQLite ; vérification globale, verdict par situation et scénarios dimensionnants disponibles ; états de coupure/prise et contraintes Icc à intégrer |
+| D — Courts-circuits | Méthode et modèles du périmètre retenu | Première version radiale IccBmin/3I0 et marges intégrée au verdict global ; shunts homopolaires, cas IEC complets, contributions et mailles à ajouter |
+| D bis — Exploitation et protection inter-départs (après V1) | Bouclages, schémas normal/secours, Icctri G, Iccbi G et réglage du départ producteur | Poste source multi-départs, points de bouclage, défaut sur un autre départ et contributions des producteurs explicitement modélisés |
+| E — Application V1 | Cas d'étude, résultats, enveloppes et exports | Scénarios P/Q et états d'exploitation éditables, échangeables et persistés ; vérification globale, contraintes Icc et scénarios dimensionnants disponibles ; hypothèses de source et persistance des résultats à intégrer |
+| E aéro — Interrupteurs aériens HTA | Organes de coupure géographiques externes | Placement sur le réseau HTA, raccordements, état ouvert/fermé, édition, scénarios et diagnostic topologique ; aucun objet interne de poste anticipé |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
-| E ter — Vues réseau et mondes internes | Carte externe, unifilaire global dérivé et unifilaires locaux des postes | Navigation sans ambiguïté, rattachements et bornes persistés, aucune divergence silencieuse entre géographie externe et contenu interne |
+| E ter — Vues réseau et mondes internes | Carte externe, unifilaire global dérivé et unifilaires locaux des postes | Navigation sans ambiguïté, rattachements et bornes persistés, interrupteurs internes aux postes et aucune divergence silencieuse entre géographie externe et contenu interne |
 | F — Ergonomie, langues et livraison | Édition géographique affinée, français/anglais et distributions | Parcours métier testés avec des utilisateurs cibles dans les deux langues ; corrections d'ergonomie et essais natifs Windows/Linux |
 
 ### Ordre proposé des prochains jalons
@@ -441,16 +447,24 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 3. **Étendre D — courts-circuits** : confronter le sous-ensemble actuel à
    l'IEC 60909-0:2026, puis ajouter défauts triphasés, shunts et courants
    capacitifs homopolaires, cas min/max, contributions et mailles.
-4. **Réaliser E bis — catalogue technologique** : types versionnés de câbles,
+4. **Réaliser E aéro — interrupteurs aériens HTA** : placement géographique,
+   raccordements, symbolisation, état ouvert/fermé et participation aux scénarios,
+   sans modéliser prématurément les interrupteurs internes aux postes.
+5. **Réaliser E bis — catalogue technologique** : types versionnés de câbles,
    lignes et transformateurs, instanciation explicite, variantes locales et
    mise à jour contrôlée sans modifier les études historiques.
-5. **Compléter E — études et restitutions** : vérification exhaustive des scénarios,
-   états de coupure/prise, persistance des résultats, exports CSV et rapport.
-6. **Réaliser E ter — mondes internes** : ajouter le modèle de conteneur et ses
-   bornes, puis la navigation carte → poste → unifilaire interne et le retour
-   synchronisé vers la carte, selon l'inspiration fonctionnelle d'Erable.
-7. **Finaliser F — usage et livraison** : formulaires métier, ergonomie géographique,
+6. **Compléter E — études et restitutions** : vérification exhaustive des scénarios,
+   hypothèses de source, persistance des résultats, exports CSV et rapport.
+7. **Réaliser E ter — mondes internes** : ajouter le modèle de conteneur, ses
+   bornes et ses interrupteurs, puis la navigation carte → poste → unifilaire
+   interne et le retour synchronisé vers la carte, selon l'inspiration
+   fonctionnelle d'Erable.
+8. **Finaliser F — usage et livraison** : formulaires métier, ergonomie géographique,
    français/anglais, performances, essais natifs et paquets Windows/Linux.
+9. **Après V1 — exploitation et protection inter-départs** : modéliser les
+   postes sources multi-départs, leurs bouclages et les schémas normal/secours,
+   puis ajouter les contributions de producteurs et calculer Icctri G/Iccbi G
+   avec les marges de réglage des protections de départ.
 
 Cet ordre pourra faire avancer en parallèle le catalogue et les maquettes de
 mondes internes, mais les calculs de défaut doivent rester prioritaires pour

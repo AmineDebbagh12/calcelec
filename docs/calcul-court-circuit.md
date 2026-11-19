@@ -91,3 +91,24 @@ homopolaire des Dyn et le refus explicite des mailles dans cette première versi
 
 Ces limites sont portées dans chaque résultat afin qu'une valeur 0.1 ne puisse
 pas être confondue avec une étude de protection finalisée.
+
+## Icctri G — jalon ultérieur
+
+La documentation technique Enedis emploie `Icctri G` dans deux contrôles du plan
+de protection. Pour la protection générale C 13-100, le défaut triphasé est au
+Point de Livraison et le courant remonte vers cette protection. Pour la
+protection du départ producteur — le cas visé ici — le défaut est en tête de
+câble d'un **autre départ** du même poste source et le courant remonte au niveau
+de la protection du départ producteur. Le producteur étudié et les autres
+producteurs couplés sur son départ contribuent au défaut. Il ne s'agit donc pas,
+en général, du courant d'un producteur placé sur l'autre départ en défaut.
+
+Source publique : [Enedis-NMO-RES_039E — impact d'une production décentralisée
+HTA sur le plan de protection](https://www.enedis.fr/media/2161/download).
+
+Ce calcul est placé après la V1. Il demande auparavant : un poste source avec
+plusieurs départs explicites, des protections de tête orientées, un modèle de
+contribution de court-circuit des producteurs HTA et BT, les schémas normal et
+secourant, ainsi que le calcul triphasé. Le futur jalon couvrira aussi `Iccbi G`
+et les marges de réglage associées afin de ne pas isoler Icctri G de son usage
+dans le plan de protection.

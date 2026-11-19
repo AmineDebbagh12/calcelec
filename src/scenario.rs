@@ -1,6 +1,9 @@
 //! Compact, shareable operating scenarios applied without mutating a project version.
-use crate::model::{Equipment, Error, Id, Network, Result};
 use crate::project::Project;
+use crate::{
+    electrical::ElectricalData,
+    model::{Equipment, Error, Id, Network, Result},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -23,6 +26,18 @@ pub struct InjectionOverride {
     pub q_var: Option<f64>,
 }
 
+/// Sparse operating-state changes kept outside the versioned network.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EquipmentOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_service: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch_closed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tap_position: Option<i16>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
@@ -33,6 +48,8 @@ pub struct Scenario {
     pub generation_scale: f64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub injections: BTreeMap<Id, InjectionOverride>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub equipment: BTreeMap<Id, EquipmentOverride>,
 }
 
 impl Scenario {
@@ -77,6 +94,60 @@ impl Scenario {
                 }
             }
         }
+        for (id, values) in &self.equipment {
+            let Some(object) = network.objects.get(id) else {
+                return Err(Error::Invalid(format!(
+                    "scénario {} : ouvrage {id} absent",
+                    self.name
+                )));
+            };
+            if matches!(
+                object.equipment,
+                Equipment::Load { .. } | Equipment::Generator { .. }
+            ) {
+                return Err(Error::Invalid(format!(
+                    "{} : l'état des injections se configure dans la table des charges et productions",
+                    object.name
+                )));
+            }
+            if values.in_service.is_none()
+                && values.switch_closed.is_none()
+                && values.tap_position.is_none()
+            {
+                return Err(Error::Invalid(format!(
+                    "{} : modification d'exploitation vide",
+                    object.name
+                )));
+            }
+            if values.switch_closed.is_some()
+                && !matches!(object.equipment, Equipment::Switch { .. })
+            {
+                return Err(Error::Invalid(format!(
+                    "{} : l'état ouvert/fermé ne s'applique qu'à un interrupteur",
+                    object.name
+                )));
+            }
+            if let Some(position) = values.tap_position {
+                let Some(ElectricalData::Transformer(data)) = &object.electrical else {
+                    return Err(Error::Invalid(format!(
+                        "{} : données détaillées de transformateur requises pour changer la prise",
+                        object.name
+                    )));
+                };
+                let Some(tap) = &data.tap else {
+                    return Err(Error::Invalid(format!(
+                        "{} : transformateur sans régleur déclaré",
+                        object.name
+                    )));
+                };
+                if !(tap.min_position..=tap.max_position).contains(&position) {
+                    return Err(Error::Invalid(format!(
+                        "{} : prise {position} hors de [{}, {}]",
+                        object.name, tap.min_position, tap.max_position
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -84,6 +155,30 @@ impl Scenario {
     pub fn apply(&self, network: &Network) -> Result<Network> {
         self.validate(network)?;
         let mut result = network.clone();
+        for (id, values) in &self.equipment {
+            let object = result
+                .objects
+                .get_mut(id)
+                .expect("validated operating-state object exists");
+            if let Some(in_service) = values.in_service {
+                object.in_service = in_service;
+            }
+            if let Some(closed) = values.switch_closed {
+                let Equipment::Switch {
+                    closed: current, ..
+                } = &mut object.equipment
+                else {
+                    unreachable!("validated switch override")
+                };
+                *current = closed;
+            }
+            if let Some(position) = values.tap_position {
+                let Some(ElectricalData::Transformer(data)) = &mut object.electrical else {
+                    unreachable!("validated transformer tap override")
+                };
+                data.tap.as_mut().expect("validated tap changer").position = position;
+            }
+        }
         for object in result.objects.values_mut() {
             let scale = match object.equipment {
                 Equipment::Load { .. } => self.load_scale,

@@ -9,11 +9,19 @@ Il contient :
 - un identifiant et un nom ;
 - un type `maximum_consumption`, `maximum_generation` ou `custom` ;
 - un coefficient global pour les charges et un pour les productions ;
-- une table optionnelle d'exceptions indexée par identifiant d'injection.
+- une table optionnelle d'exceptions indexée par identifiant d'injection ;
+- une table optionnelle et clairsemée d'états d'exploitation par ouvrage.
 
 Une exception peut imposer P, Q et/ou l'état en service. Elle est appliquée après
 le coefficient global. Les valeurs absentes héritent donc du réseau mis à
 l'échelle. Seules les charges et productions peuvent être ciblées.
+
+Un état d'exploitation peut modifier `in_service`, `switch_closed` pour un
+interrupteur, et `tap_position` pour un transformateur dont le régleur est
+explicitement décrit. Le type d'ouvrage et les bornes de prise sont validés
+avant toute application. Le réseau versionné reste inchangé : le solveur reçoit
+une copie d'étude. Le fichier
+`examples/scenario-transformer-tap.json` fournit un exemple compact.
 
 ```json
 {
@@ -93,10 +101,16 @@ indépendamment du projet.
 En mode déséquilibré, l'enveloppe publie aussi U2/U1 et le déplacement du neutre.
 Ces grandeurs deviennent contraignantes seulement lorsqu'un seuil est configuré
 par le modèle appelant ; l'interface expose actuellement les seuils de tension
-et de charge. IccBmin et 3I0 ne font pas encore partie de cette passe
-multi-situations : leur intégration au même verdict est le prochain prolongement
-du moteur de court-circuit.
+et de charge.
 
-Les prochains ajouts seront les états de prises/interrupteurs par scénario et
-l'intégration des contraintes IccBmin/3I0. La fusion concurrente de deux
+Depuis la V0.17, l'interface peut joindre au verdict l'étude IccBmin/3I0 et ses
+marges de protection. Les paramètres sont chargés depuis le JSON d'options du
+moteur de défaut. Le réseau de base couvre les scénarios P/Q purs, puisque le
+moteur néglige encore charges et contributions des producteurs. Depuis la V0.18,
+chaque scénario modifiant un interrupteur, l'état de service ou une prise est en
+revanche recalculé séparément pour le défaut. Un critère 3I0 demandé mais non
+calculable rend le verdict global incomplet, jamais conforme.
+
+Les prochains ajouts seront les hypothèses de source et de puissance de
+court-circuit par scénario. La fusion concurrente de deux
 collections modifiées séparément reste également à définir.

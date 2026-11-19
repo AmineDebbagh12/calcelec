@@ -4,7 +4,7 @@ use crate::{
     model::{Error, Id, Result},
     project::Project,
     scenario::Scenario,
-    unbalanced,
+    short_circuit, unbalanced,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,7 +12,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-pub const SCREENING_VERSION: &str = "scenario-screening-0.1";
+pub const SCREENING_VERSION: &str = "scenario-screening-0.3";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +37,9 @@ pub enum MetricKind {
     MaximumLoading,
     NegativeSequence,
     NeutralDisplacement,
+    MinimumShortCircuit,
+    MinimumResidualDetection,
+    MaximumResidualCurrent,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,6 +142,45 @@ pub struct ScreeningReport {
     pub status: ScreeningStatus,
     pub scenarios: Vec<ScenarioSummary>,
     pub dimensioning_cases: Vec<DimensioningCase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault_study: Option<FaultScreening>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FaultScreening {
+    pub status: ScreeningStatus,
+    pub solver_version: String,
+    pub options: short_circuit::Options,
+    pub constraints: Vec<Constraint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<short_circuit::ShortCircuitResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cases: Vec<FaultCase>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FaultCase {
+    pub scenario_id: Option<Id>,
+    pub scenario_name: String,
+    pub status: ScreeningStatus,
+    pub constraints: Vec<Constraint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<short_circuit::ShortCircuitResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+fn minimum_metric(metric: MetricKind) -> bool {
+    matches!(
+        metric,
+        MetricKind::MinimumVoltage
+            | MetricKind::MinimumShortCircuit
+            | MetricKind::MinimumResidualDetection
+    )
 }
 
 struct CaseBuilder {
@@ -179,9 +221,12 @@ impl CaseBuilder {
         limit: Option<f64>,
         unit: &str,
     ) {
-        let margin = limit.map(|limit| match metric {
-            MetricKind::MinimumVoltage => value - limit,
-            _ => limit - value,
+        let margin = limit.map(|limit| {
+            if minimum_metric(metric) {
+                value - limit
+            } else {
+                limit - value
+            }
         });
         if margin.is_some_and(|margin| margin < 0.0) {
             let constraint = Constraint {
@@ -197,9 +242,10 @@ impl CaseBuilder {
                 .iter_mut()
                 .find(|current| current.object_id == object_id && current.metric == metric)
             {
-                let worse = match metric {
-                    MetricKind::MinimumVoltage => constraint.value < current.value,
-                    _ => constraint.value > current.value,
+                let worse = if minimum_metric(metric) {
+                    constraint.value < current.value
+                } else {
+                    constraint.value > current.value
                 };
                 if worse {
                     *current = constraint;
@@ -222,9 +268,10 @@ impl CaseBuilder {
         envelope
             .entry((object_id, metric))
             .and_modify(|current| {
-                let worse = match metric {
-                    MetricKind::MinimumVoltage => candidate.value < current.value,
-                    _ => candidate.value > current.value,
+                let worse = if minimum_metric(metric) {
+                    candidate.value < current.value
+                } else {
+                    candidate.value > current.value
                 };
                 if worse {
                     *current = candidate.clone();
@@ -394,6 +441,7 @@ pub fn screen_balanced(
         status: overall(&summaries),
         scenarios: summaries,
         dimensioning_cases: envelope.into_values().collect(),
+        fault_study: None,
     })
 }
 
@@ -526,5 +574,201 @@ pub fn screen_unbalanced(
         status: overall(&summaries),
         scenarios: summaries,
         dimensioning_cases: envelope.into_values().collect(),
+        fault_study: None,
     })
+}
+
+fn merge_status(left: ScreeningStatus, right: ScreeningStatus) -> ScreeningStatus {
+    match (left, right) {
+        (ScreeningStatus::Unable, _) | (_, ScreeningStatus::Unable) => ScreeningStatus::Unable,
+        (ScreeningStatus::Constrained, _) | (_, ScreeningStatus::Constrained) => {
+            ScreeningStatus::Constrained
+        }
+        _ => ScreeningStatus::Compliant,
+    }
+}
+
+fn add_fault_dimension(
+    report: &mut ScreeningReport,
+    scenario: Option<&Scenario>,
+    constraint: &Constraint,
+) {
+    let candidate = DimensioningCase {
+        object_id: constraint.object_id,
+        metric: constraint.metric,
+        value: constraint.value,
+        limit: Some(constraint.limit),
+        margin: Some(constraint.margin),
+        unit: constraint.unit.clone(),
+        scenario_id: scenario.map(|value| value.id),
+        scenario_name: scenario
+            .map(|value| value.name.clone())
+            .unwrap_or_else(|| "Réseau de base".into()),
+        constrained: constraint.margin < 0.0,
+    };
+    if let Some(current) = report.dimensioning_cases.iter_mut().find(|current| {
+        current.object_id == candidate.object_id && current.metric == candidate.metric
+    }) {
+        let worse = if minimum_metric(candidate.metric) {
+            candidate.value < current.value
+        } else {
+            candidate.value > current.value
+        };
+        if worse {
+            *current = candidate;
+        }
+    } else {
+        report.dimensioning_cases.push(candidate);
+    }
+}
+
+fn fault_case(
+    report: &mut ScreeningReport,
+    scenario: Option<&Scenario>,
+    network: Result<crate::model::Network>,
+    options: &short_circuit::Options,
+) -> FaultCase {
+    let mut case = FaultCase {
+        scenario_id: scenario.map(|value| value.id),
+        scenario_name: scenario
+            .map(|value| value.name.clone())
+            .unwrap_or_else(|| "Réseau de base".into()),
+        status: ScreeningStatus::Compliant,
+        constraints: vec![],
+        result: None,
+        error: None,
+    };
+    let result = match network.and_then(|network| short_circuit::solve(&network, options)) {
+        Ok(result) => result,
+        Err(error) => {
+            case.status = ScreeningStatus::Unable;
+            case.error = Some(error.to_string());
+            return case;
+        }
+    };
+    let mut incomplete = false;
+    for assessment in &result.protection_assessments {
+        if let Some(limit) = assessment.minimum_icc_b_threshold_a {
+            let constraint = Constraint {
+                object_id: assessment.bus_id,
+                metric: MetricKind::MinimumShortCircuit,
+                value: assessment.icc_b_min_a,
+                limit,
+                margin: assessment.icc_b_min_a - limit,
+                unit: "A".into(),
+            };
+            add_fault_dimension(report, scenario, &constraint);
+            if constraint.margin < 0.0 {
+                case.constraints.push(constraint);
+            }
+        }
+        if let Some(requirement) = assessment.residual_criterion {
+            let (Some(limit), Some(value)) =
+                (assessment.residual_threshold_a, assessment.three_i0_a)
+            else {
+                incomplete = true;
+                continue;
+            };
+            let metric = match requirement {
+                short_circuit::ResidualCriterion::MinimumDetection => {
+                    MetricKind::MinimumResidualDetection
+                }
+                short_circuit::ResidualCriterion::MaximumAdmissible => {
+                    MetricKind::MaximumResidualCurrent
+                }
+            };
+            let margin = if minimum_metric(metric) {
+                value - limit
+            } else {
+                limit - value
+            };
+            let constraint = Constraint {
+                object_id: assessment.bus_id,
+                metric,
+                value,
+                limit,
+                margin,
+                unit: "A".into(),
+            };
+            add_fault_dimension(report, scenario, &constraint);
+            if margin < 0.0 {
+                case.constraints.push(constraint);
+            }
+        }
+    }
+    case.status = if incomplete {
+        ScreeningStatus::Unable
+    } else if case.constraints.is_empty() {
+        ScreeningStatus::Compliant
+    } else {
+        ScreeningStatus::Constrained
+    };
+    if incomplete {
+        case.error = Some(
+            "au moins un critère 3I0 ne peut pas être évalué avec le modèle homopolaire actuel"
+                .into(),
+        );
+    }
+    case.result = Some(result);
+    case
+}
+
+/// Adds the common base fault study and every scenario that changes operating
+/// states. Pure P/Q scenarios are not recomputed because the current fault
+/// engine deliberately neglects loads and generator contributions.
+pub fn add_fault_studies(
+    mut report: ScreeningReport,
+    project: &Project,
+    scenarios: &[Scenario],
+    options: &short_circuit::Options,
+) -> ScreeningReport {
+    let mut cases = vec![];
+    match project.network() {
+        Err(error) => cases.push(fault_case(&mut report, None, Err(error), options)),
+        Ok(base) => {
+            cases.push(fault_case(&mut report, None, Ok(base.clone()), options));
+            for scenario in scenarios
+                .iter()
+                .filter(|scenario| !scenario.equipment.is_empty())
+            {
+                cases.push(fault_case(
+                    &mut report,
+                    Some(scenario),
+                    scenario.apply(&base),
+                    options,
+                ));
+            }
+        }
+    }
+    let fault_status = cases
+        .iter()
+        .fold(ScreeningStatus::Compliant, |status, case| {
+            merge_status(status, case.status)
+        });
+    let constraints = cases
+        .iter()
+        .flat_map(|case| case.constraints.clone())
+        .collect();
+    let first_result = cases.first().and_then(|case| case.result.clone());
+    let first_error = cases.first().and_then(|case| case.error.clone());
+    let fault = FaultScreening {
+        status: fault_status,
+        solver_version: short_circuit::SOLVER_VERSION.into(),
+        options: options.clone(),
+        constraints,
+        result: first_result,
+        error: first_error,
+        cases,
+    };
+    report.status = merge_status(report.status, fault.status);
+    report.fault_study = Some(fault);
+    report
+}
+
+pub fn add_fault_study(
+    report: ScreeningReport,
+    project: &Project,
+    options: &short_circuit::Options,
+) -> ScreeningReport {
+    add_fault_studies(report, project, &[], options)
 }

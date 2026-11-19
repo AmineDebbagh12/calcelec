@@ -47,6 +47,9 @@ impl MapResults<'_> {
                             | calcelec::screening::MetricKind::MaximumVoltage
                             | calcelec::screening::MetricKind::NegativeSequence
                             | calcelec::screening::MetricKind::NeutralDisplacement
+                            | calcelec::screening::MetricKind::MinimumShortCircuit
+                            | calcelec::screening::MetricKind::MinimumResidualDetection
+                            | calcelec::screening::MetricKind::MaximumResidualCurrent
                     )
             }),
         }

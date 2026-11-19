@@ -8,6 +8,7 @@ HTA/BT, avec la France et Enedis comme référence métier.
 les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT.
 Un premier moteur radial de court-circuit publie IccBmin, 3I0 et les marges de
 protection ; son périmètre IEC 60909 reste à étendre.**
+La version de développement courante est **V0.18.1**.
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -70,6 +71,10 @@ les options et la version du moteur.
 L'enregistrement SQLite conserve atomiquement la collection avec le réseau et
 son historique. Toute la collection peut aussi être transférée dans un fichier
 JSON lié à l'identifiant du projet et à sa version exacte.
+Depuis la V0.18, la rubrique **États d'exploitation** peut aussi mettre un
+ouvrage en/hors service, ouvrir ou fermer un interrupteur et choisir la prise
+d'un transformateur déclaré. Ces exceptions restent dans le scénario compact
+et ne modifient pas la version du réseau.
 
 Le bouton **Vérifier toutes les situations** calcule toute la collection (et,
 au choix, le réseau de base). Il ne compare pas les scénarios deux à deux : il
@@ -78,6 +83,11 @@ verdict global conservateur. Le rapport donne les dépassements de tension et de
 charge ainsi que, pour chaque ouvrage et grandeur, la situation dimensionnante.
 Il est exportable en JSON et les ouvrages contraints apparaissent en rouge sur
 la carte. Une situation non calculable interdit de conclure à la conformité.
+Le même rapport peut intégrer IccBmin, 3I0 et leurs marges : cocher
+**Inclure IccBmin et 3I0**, puis charger par exemple
+`examples/fault-study-rural.json`. Le réseau de base couvre les scénarios P/Q
+purs ; chaque scénario modifiant l'exploitation possède son propre calcul de
+défaut. Les contributions des producteurs restent à modéliser.
 
 ## Toolbox géographique
 
@@ -295,16 +305,21 @@ projection du neutre métallique vers le modèle de retour de terre pandapower.
 - Étendre la comparaison indépendante aux modèles de neutre/terre, Yzn et aux
   topologies maillées ; compléter le moteur de défaut par les shunts homopolaires,
   cas min/max IEC 60909, contributions et défauts triphasés.
+- Ajouter avant le catalogue les interrupteurs aériens HTA comme ouvrages
+  géographiques externes, avec état, raccordements et scénarios d'exploitation.
 - Ajouter le catalogue versionné de technologies de câbles/lignes et de
   transformateurs, avec instanciation et mises à jour explicites des ouvrages.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents
   et affiner la vue unifilaire globale dérivée.
 - Ajouter une navigation inspirée du principe d'Erable : carte des câbles,
   interrupteurs et postes, puis ouverture d'un monde interne unifilaire pour les
-  objets techniques d'un poste, sans géométrie globale indépendante.
+  objets techniques d'un poste, sans géométrie globale indépendante. Les
+  interrupteurs internes aux postes seront ajoutés dans ce monde local.
 - Ajouter cas d'étude, annuler/rétablir, persistance des résultats, rapports et
   conditionnement compressé des échanges.
 - Consacrer une phase aux parcours et à l'ergonomie de l'éditeur géographique.
 - Proposer le français et l'anglais, avec choix de langue mémorisé, traduction
   de l'interface, des diagnostics et des rapports ; le prototype reste actuellement en français.
 - Vérifier l'application native et préparer les distributions Windows/Linux.
+- Après la V1, étudier les bouclages entre départs de postes sources et les
+  schémas normal/secours à l'échelle de plusieurs départs.

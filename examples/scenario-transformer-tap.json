@@ -1,0 +1,12 @@
+{
+  "id": "10000000-0000-4000-8000-000000000003",
+  "name": "Prise haute transformateur 1 — démonstration",
+  "kind": "custom",
+  "load_scale": 1.0,
+  "generation_scale": 1.0,
+  "equipment": {
+    "2075b29a-32b1-4b80-9162-2ba05d11c163": {
+      "tap_position": 1
+    }
+  }
+}

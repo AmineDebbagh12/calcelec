@@ -34,3 +34,9 @@ Le cas `reference-rural-meshed.json` donne un composant, huit bus alimentés et
 une fermeture. Les tests basculent aussi un interrupteur HTA : ouvert, le réseau
 est radial ; fermé, une fermeture apparaît ; après ouverture d'une branche de
 départ, le diagnostic distingue le composant sans source.
+
+Dans le périmètre V1, les interrupteurs aériens HTA seront des ouvrages
+géographiques externes directement couverts par ce diagnostic. Les interrupteurs
+de poste attendront les mondes internes unifilaires. Les bouclages entre départs
+issus de postes sources et l'étude des schémas normal/secours sont reportés après
+la V1, car ils demandent une représentation multi-départs et des règles de reprise.
