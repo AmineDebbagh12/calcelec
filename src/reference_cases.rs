@@ -55,6 +55,7 @@ fn network(name: &str, objects: Vec<Object>) -> Network {
         name: name.into(),
         frequency_hz: 50.0,
         coordinate_reference: CoordinateReference::LocalMeters,
+        technologies: BTreeMap::new(),
         objects: objects
             .into_iter()
             .map(|o| (o.id, o))

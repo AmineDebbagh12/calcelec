@@ -94,6 +94,8 @@ pub struct Object {
     pub geometry: Geometry,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub electrical: Option<crate::electrical::ElectricalData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub technology: Option<crate::catalog::TechnologyBinding>,
 }
 
 impl Object {
@@ -105,6 +107,7 @@ impl Object {
             equipment,
             geometry: Geometry::Unlocated,
             electrical: None,
+            technology: None,
         }
     }
     pub fn kind(&self) -> &'static str {
@@ -150,6 +153,8 @@ pub struct Network {
     pub frequency_hz: f64,
     #[serde(default)]
     pub coordinate_reference: CoordinateReference,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub technologies: BTreeMap<Id, crate::catalog::Technology>,
     pub objects: BTreeMap<Id, Object>,
 }
 
@@ -167,6 +172,7 @@ impl Network {
             return Err(Error::Invalid("nom du réseau vide".into()));
         }
         positive(self.frequency_hz, "fréquence")?;
+        crate::catalog::validate_catalog(&self.technologies)?;
         for (id, object) in &self.objects {
             object.geometry.validate()?;
             match (&object.equipment, &object.geometry) {
@@ -202,6 +208,59 @@ impl Network {
             if let Some(data) = &object.electrical {
                 data.validate_for(object, self)
                     .map_err(|error| Error::Invalid(format!("{} : {error}", object.name)))?;
+            }
+            if let Some(binding) = &object.technology {
+                let technology =
+                    self.technologies
+                        .get(&binding.technology_id)
+                        .ok_or_else(|| {
+                            Error::Invalid(format!(
+                                "{} : technologie {} absente du projet",
+                                object.name, binding.technology_id
+                            ))
+                        })?;
+                if !technology.applies_to(&object.equipment) {
+                    return Err(Error::Invalid(format!(
+                        "{} : technologie incompatible avec l'ouvrage",
+                        object.name
+                    )));
+                }
+                if let (
+                    crate::catalog::TechnologyData::Transformer {
+                        primary_voltage_v,
+                        secondary_voltage_v,
+                        ..
+                    },
+                    Equipment::Transformer { from, to, .. },
+                ) = (&technology.data, &object.equipment)
+                {
+                    let Equipment::Bus {
+                        voltage_v: from_voltage,
+                    } = self.objects[from].equipment
+                    else {
+                        unreachable!("validated transformer endpoint")
+                    };
+                    let Equipment::Bus {
+                        voltage_v: to_voltage,
+                    } = self.objects[to].equipment
+                    else {
+                        unreachable!("validated transformer endpoint")
+                    };
+                    if from_voltage != *primary_voltage_v || to_voltage != *secondary_voltage_v {
+                        return Err(Error::Invalid(format!(
+                            "{} : tensions des bornes incompatibles avec la technologie {}",
+                            object.name, technology.designation
+                        )));
+                    }
+                }
+                if !binding.locally_modified
+                    && !technology.resolved_matches(&object.equipment, &object.electrical)
+                {
+                    return Err(Error::Invalid(format!(
+                        "{} : paramètres différents de la technologie sans variante locale explicite",
+                        object.name
+                    )));
+                }
             }
             match object.equipment {
                 Equipment::Bus { voltage_v } => positive(voltage_v, "tension nominale")?,
@@ -475,6 +534,7 @@ pub fn rural_example() -> Network {
         name: "Exemple rural France — HTA / BT".into(),
         frequency_hz: 50.0,
         coordinate_reference: CoordinateReference::LocalMeters,
+        technologies: crate::catalog::educational_catalog(),
         objects,
     }
 }

@@ -340,7 +340,9 @@ fn object_kind_cannot_be_changed_and_invalid_equipment_batch_is_atomic() {
 }
 #[test]
 fn schema_two_projects_and_sqlite_migrate_to_three_with_ids_preserved() {
-    let mut original = Project::new(rural_example()).unwrap();
+    let mut root = rural_example();
+    root.technologies.clear();
+    let mut original = Project::new(root).unwrap();
     let id = bus(&original.root, 400.0);
     let change = original.prepare(
         "Ancien poste",

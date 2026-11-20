@@ -253,7 +253,7 @@ les hypothèses. L'erreur de bilan publiée est le module de
 `Ssource − Sdemande nette − Spertes`, en VA.
 Les résultats sont invalidés après modification de la version, et les réponses
 tardives d'un calcul précédent sont écartées. L'export est distinct du projet
-et ne modifie pas son schéma 4.
+et ne modifie pas son schéma 5.
 
 ## Utilisation
 

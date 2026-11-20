@@ -351,7 +351,9 @@ fn detailed_edits_share_undo_and_sqlite_roundtrip_atomically() {
 }
 #[test]
 fn legacy_schema_three_migrates_without_inventing_data_and_new_operation_requires_four() {
-    let p = Project::new(rural_example()).unwrap();
+    let mut root = rural_example();
+    root.technologies.clear();
+    let p = Project::new(root).unwrap();
     let mut old = serde_json::to_value(&p).unwrap();
     old["schema_version"] = 3.into();
     let mut migrated = Project::from_json(&old.to_string()).unwrap();
@@ -384,7 +386,9 @@ fn legacy_schema_three_migrates_without_inventing_data_and_new_operation_require
 
 #[test]
 fn old_schema_three_sqlite_history_migrates_without_changing_network_versions() {
-    let mut original = Project::new(rural_example()).unwrap();
+    let mut root = rural_example();
+    root.technologies.clear();
+    let mut original = Project::new(root).unwrap();
     let id = *original.root.objects.keys().next().unwrap();
     let change = original.prepare(
         "Ancien poste",

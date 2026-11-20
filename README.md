@@ -8,7 +8,7 @@ HTA/BT, avec la France et Enedis comme référence métier.
 les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT.
 Un premier moteur radial de court-circuit publie IccBmin, 3I0 et les marges de
 protection ; son périmètre IEC 60909 reste à étendre.**
-La version de développement courante est **V0.19**.
+La version de développement courante est **V0.20**.
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -87,6 +87,18 @@ identifiés dans le format. Ils sont ponctuels sur la carte, ne peuvent relier
 que deux nœuds d'au moins 1 kV, possèdent un symbole ouvert/fermé et participent
 au diagnostic topologique et aux calculs dans l'état enregistré sur le réseau.
 Les anciens interrupteurs sans catégorie restent lisibles comme ouvrages génériques.
+
+En V0.20, chaque projet peut embarquer un **catalogue technologique versionné**.
+Une révision possède un identifiant immuable, une famille stable, une désignation,
+une provenance, un domaine d'emploi et ses paramètres SI. L'inspecteur des lignes
+et transformateurs permet de choisir puis de réappliquer un type. Les paramètres
+résolus restent dans l'ouvrage ; une modification manuelle est signalée comme
+variante locale explicite. Le panneau Catalogue permet l'import/export JSON.
+Les types 95AL, 150AL, 150CU, 148AA et transformateur 250 kVA fournis au démarrage
+sont exclusivement pédagogiques et ne constituent pas des données Enedis.
+Le [contrat et le parcours du catalogue](docs/catalogue-technologique.md) sont
+documentés séparément ; un fichier d'import minimal est fourni dans
+`examples/catalog-technologies-demo.json`.
 
 Le bouton **Vérifier toutes les situations** calcule toute la collection (et,
 au choix, le réseau de base). Il ne compare pas les scénarios deux à deux : il
@@ -323,8 +335,8 @@ projection du neutre métallique vers le modèle de retour de terre pandapower.
 - Étendre la comparaison indépendante aux modèles de neutre/terre, Yzn et aux
   topologies maillées ; compléter le moteur de défaut par les shunts homopolaires,
   cas min/max IEC 60909, contributions et défauts triphasés.
-- Ajouter le catalogue versionné de technologies de câbles/lignes et de
-  transformateurs, avec instanciation et mises à jour explicites des ouvrages.
+- Enrichir le catalogue V0.20 avec des modèles détaillés validés par conducteur,
+  conditions thermiques, neutres et essais transformateurs issus de sources métier.
 - Ajouter le déplacement groupé des postes, l’ajustement des tracés incidents
   et affiner la vue unifilaire globale dérivée.
 - Ajouter une navigation inspirée du principe d'Erable : carte des câbles,

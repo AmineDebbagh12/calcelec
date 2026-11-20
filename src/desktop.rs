@@ -181,6 +181,7 @@ pub struct Desktop {
     result_scenario: Option<Scenario>,
     scenario_path: String,
     scenario_collection_path: String,
+    catalog_path: String,
     results_view: bool,
     result_path: String,
     history: EditHistory,
@@ -192,6 +193,7 @@ pub struct Desktop {
     to_bus: Option<Id>,
     draft: Option<Vec<Coordinate>>,
     equipment: Equipment,
+    technology: Option<calcelec::catalog::TechnologyBinding>,
     electrical_text: String,
 }
 impl Desktop {
@@ -233,6 +235,7 @@ impl Desktop {
             result_scenario: None,
             scenario_path: "scenario.calcelec.json".into(),
             scenario_collection_path: "scenarios.calcelec.json".into(),
+            catalog_path: "catalogue.calcelec.json".into(),
             results_view: false,
             result_path: "resultats.calcelec.json".into(),
             history: EditHistory::default(),
@@ -244,6 +247,7 @@ impl Desktop {
             to_bus: None,
             draft: None,
             equipment: Equipment::Bus { voltage_v: 400.0 },
+            technology: None,
             electrical_text: String::new(),
         }
     }
@@ -257,6 +261,7 @@ impl Desktop {
         self.name = object.name.clone();
         self.geometry = object.geometry.clone();
         self.equipment = object.equipment.clone();
+        self.technology = object.technology.clone();
         self.electrical_text = object
             .electrical
             .as_ref()
@@ -355,8 +360,28 @@ impl Desktop {
                 )?,
             )
         };
-        if electrical != object.electrical {
-            operations.push(Operation::SetElectrical { id, electrical });
+        let electrical_changed = electrical != object.electrical;
+        if electrical_changed {
+            operations.push(Operation::SetElectrical {
+                id,
+                electrical: electrical.clone(),
+            });
+        }
+        let mut technology = self.technology.clone();
+        if let Some(binding) = &mut technology
+            && !binding.locally_modified
+            && self
+                .network
+                .technologies
+                .get(&binding.technology_id)
+                .is_some_and(|technology| {
+                    !technology.resolved_matches(&self.equipment, &electrical)
+                })
+        {
+            binding.locally_modified = true;
+        }
+        if technology != object.technology {
+            operations.push(Operation::SetTechnology { id, technology });
         }
         if operations.is_empty() {
             return Ok("Aucune propriété modifiée.".into());
@@ -593,6 +618,69 @@ impl Desktop {
             }
         }
         ui.separator();
+    }
+    fn catalog_manager(&mut self, ui: &mut egui::Ui) {
+        ui.collapsing(
+            format!("Catalogue technologique ({})", self.network.technologies.len()),
+            |ui| {
+                ui.small("Les révisions sont immuables et embarquées dans le projet. Les valeurs de démonstration ne sont pas des données Enedis.");
+                for technology in self.network.technologies.values() {
+                    ui.label(format!(
+                        "{} · r{}",
+                        technology.designation, technology.revision
+                    ));
+                    ui.small(format!("{} — {}", technology.provenance, technology.domain));
+                }
+                ui.text_edit_singleline(&mut self.catalog_path);
+                ui.horizontal(|ui| {
+                    if ui.button("Importer des révisions").clicked() {
+                        let result = (|| -> Result<String> {
+                            let json = std::fs::read_to_string(&self.catalog_path)?;
+                            let technologies: Vec<calcelec::catalog::Technology> =
+                                serde_json::from_str(&json)?;
+                            let mut operations = vec![];
+                            for technology in technologies {
+                                technology.validate()?;
+                                match self.network.technologies.get(&technology.id) {
+                                    Some(existing) if existing != &technology => {
+                                        return Err(calcelec::model::Error::Conflict(format!(
+                                            "la révision {} existe avec un autre contenu",
+                                            technology.id
+                                        )));
+                                    }
+                                    Some(_) => {}
+                                    None => operations.push(Operation::PutTechnology { technology }),
+                                }
+                            }
+                            if operations.is_empty() {
+                                return Ok("Toutes les révisions sont déjà présentes.".into());
+                            }
+                            self.commit_edit("Import de technologies", operations)
+                        })();
+                        self.report(result);
+                    }
+                    if ui.button("Exporter").clicked() {
+                        let result = serde_json::to_string_pretty(
+                            &self.network.technologies.values().collect::<Vec<_>>(),
+                        )
+                        .map_err(Into::into)
+                        .and_then(|json| storage::export_new(&self.catalog_path, &json))
+                        .map(|_| "Catalogue exporté sans écraser de fichier existant.".into());
+                        self.report(result);
+                    }
+                });
+                if self.network.technologies.is_empty()
+                    && ui.button("Ajouter le catalogue pédagogique").clicked()
+                {
+                    let operations = calcelec::catalog::educational_catalog()
+                        .into_values()
+                        .map(|technology| Operation::PutTechnology { technology })
+                        .collect();
+                    let result = self.commit_edit("Ajout du catalogue pédagogique", operations);
+                    self.report(result);
+                }
+            },
+        );
     }
     fn invalidate_scenario_result(&mut self) {
         self.study = None;
@@ -2107,6 +2195,80 @@ impl Desktop {
     }
     fn equipment_editor(&mut self, ui: &mut egui::Ui) {
         ui.collapsing("Paramètres électriques et raccordements", |ui| {
+            let compatible: Vec<_> = self
+                .network
+                .technologies
+                .values()
+                .filter(|technology| technology.applies_to(&self.equipment))
+                .cloned()
+                .collect();
+            if !compatible.is_empty() {
+                ui.group(|ui| {
+                    ui.label("Technologie embarquée dans le projet");
+                    let before = self.technology.as_ref().map(|value| value.technology_id);
+                    let mut selected = before;
+                    let selected_text = selected
+                        .and_then(|id| self.network.technologies.get(&id))
+                        .map(|technology| {
+                            format!(
+                                "{} · révision {}",
+                                technology.designation, technology.revision
+                            )
+                        })
+                        .unwrap_or_else(|| "Paramètres libres".into());
+                    egui::ComboBox::from_id_salt("equipment_technology")
+                        .selected_text(selected_text)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut selected, None, "Paramètres libres");
+                            for technology in &compatible {
+                                ui.selectable_value(
+                                    &mut selected,
+                                    Some(technology.id),
+                                    format!(
+                                        "{} · révision {}",
+                                        technology.designation, technology.revision
+                                    ),
+                                );
+                            }
+                        });
+                    let reapply = selected.is_some()
+                        && ui.button("Réappliquer les paramètres du type").clicked();
+                    if selected != before || reapply {
+                        if let Some(id) = selected {
+                            let technology = &self.network.technologies[&id];
+                            if let Ok(resolved) = technology.instantiate(&self.equipment) {
+                                self.equipment = resolved;
+                                self.electrical_text = technology
+                                    .electrical
+                                    .as_ref()
+                                    .map(|data| {
+                                        serde_json::to_string_pretty(data)
+                                            .expect("validated catalogue electrical data")
+                                    })
+                                    .unwrap_or_default();
+                                self.technology = Some(calcelec::catalog::TechnologyBinding {
+                                    technology_id: id,
+                                    locally_modified: false,
+                                });
+                            }
+                        } else {
+                            self.technology = None;
+                        }
+                    }
+                    if let Some(binding) = &self.technology
+                        && let Some(technology) =
+                            self.network.technologies.get(&binding.technology_id)
+                    {
+                        ui.small(format!("{} · {}", technology.provenance, technology.domain));
+                        if binding.locally_modified {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                "Variante locale explicite : les paramètres diffèrent du type.",
+                            );
+                        }
+                    }
+                });
+            }
             match &mut self.equipment {
                 Equipment::Bus { voltage_v } => {
                     numeric(ui, "Tension composée nominale (V)", voltage_v)
@@ -2493,6 +2655,7 @@ impl Desktop {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.scenario_manager(ui);
+                    self.catalog_manager(ui);
                     self.toolbox(ui);
                     self.inspector(ui);
                     ui.separator();

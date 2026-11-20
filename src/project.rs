@@ -3,7 +3,7 @@ use crate::model::{Equipment, Error, Id, Network, Object, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -43,6 +43,16 @@ pub enum Operation {
         id: Id,
         electrical: Option<crate::electrical::ElectricalData>,
     },
+    PutTechnology {
+        technology: crate::catalog::Technology,
+    },
+    RemoveTechnology {
+        id: Id,
+    },
+    SetTechnology {
+        id: Id,
+        technology: Option<crate::catalog::TechnologyBinding>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -70,6 +80,20 @@ pub struct Project {
 
 impl ChangeSet {
     pub(crate) fn migrate(mut self) -> Result<Self> {
+        if self.schema_version < 5
+            && self.operations.iter().any(|op| {
+                matches!(
+                    op,
+                    Operation::PutTechnology { .. }
+                        | Operation::RemoveTechnology { .. }
+                        | Operation::SetTechnology { .. }
+                )
+            })
+        {
+            return Err(Error::Invalid(
+                "les technologies exigent le schéma 5".into(),
+            ));
+        }
         if self.schema_version < 4
             && self.operations.iter().any(|op| {
                 matches!(op, Operation::SetElectrical { .. })
@@ -94,7 +118,7 @@ impl ChangeSet {
             }
             self.schema_version = SCHEMA_VERSION;
         }
-        if matches!(self.schema_version, 2 | 3) {
+        if matches!(self.schema_version, 2..=4) {
             self.schema_version = SCHEMA_VERSION;
         }
         supported(self.schema_version)?;
@@ -112,6 +136,18 @@ fn supported(version: u32) -> Result<()> {
 impl Project {
     /// Upgrade representation without changing object, batch or network-version IDs.
     pub(crate) fn migrate(mut self) -> Result<Self> {
+        if self.schema_version < 5
+            && (!self.root.technologies.is_empty()
+                || self
+                    .root
+                    .objects
+                    .values()
+                    .any(|object| object.technology.is_some()))
+        {
+            return Err(Error::Invalid(
+                "les technologies exigent le schéma 5".into(),
+            ));
+        }
         if self.schema_version < 4
             && self
                 .root
@@ -137,7 +173,7 @@ impl Project {
             }
             self.schema_version = SCHEMA_VERSION;
         }
-        if matches!(self.schema_version, 2 | 3) {
+        if matches!(self.schema_version, 2..=4) {
             self.schema_version = SCHEMA_VERSION;
         }
         supported(self.schema_version)?;
@@ -253,6 +289,40 @@ fn check_change(change: &ChangeSet, project: Id, head: Id) -> Result<()> {
 
 fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<()> {
     for operation in operations {
+        if let Operation::PutTechnology { technology } = operation {
+            technology.validate()?;
+            match network.technologies.get(&technology.id) {
+                Some(existing) if existing != technology => {
+                    return Err(Error::Conflict(format!(
+                        "la révision technologique {} est immuable",
+                        technology.id
+                    )));
+                }
+                Some(_) => {}
+                None => {
+                    network
+                        .technologies
+                        .insert(technology.id, technology.clone());
+                }
+            }
+            continue;
+        }
+        if let Operation::RemoveTechnology { id } = operation {
+            if network.objects.values().any(|object| {
+                object
+                    .technology
+                    .as_ref()
+                    .is_some_and(|binding| binding.technology_id == *id)
+            }) {
+                return Err(Error::Invalid(format!(
+                    "technologie {id} encore utilisée par un ouvrage"
+                )));
+            }
+            if network.technologies.remove(id).is_none() {
+                return Err(Error::Invalid(format!("technologie {id} absente")));
+            }
+            continue;
+        }
         if let Operation::Create { object } = operation {
             if network.objects.contains_key(&object.id) {
                 return Err(Error::Conflict(format!("objet {} déjà présent", object.id)));
@@ -268,8 +338,11 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
             | Operation::SetSwitch { id, .. } => id,
             Operation::SetGeometry { id, .. }
             | Operation::SetEquipment { id, .. }
-            | Operation::SetElectrical { id, .. } => id,
-            Operation::Create { .. } => unreachable!(),
+            | Operation::SetElectrical { id, .. }
+            | Operation::SetTechnology { id, .. } => id,
+            Operation::Create { .. }
+            | Operation::PutTechnology { .. }
+            | Operation::RemoveTechnology { .. } => unreachable!(),
         };
         let object = network
             .objects
@@ -280,6 +353,7 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
                 network.objects.remove(id);
             }
             Operation::SetElectrical { electrical, .. } => object.electrical = electrical.clone(),
+            Operation::SetTechnology { technology, .. } => object.technology = technology.clone(),
             Operation::SetEquipment { equipment, .. } => {
                 if std::mem::discriminant(equipment) != std::mem::discriminant(&object.equipment) {
                     return Err(Error::Invalid("le type d'un ouvrage ne peut pas être changé par édition de ses propriétés".into()));
@@ -309,7 +383,9 @@ fn apply_operations(network: &mut Network, operations: &[Operation]) -> Result<(
                 Equipment::Switch { closed: state, .. } => *state = *closed,
                 _ => return Err(Error::Invalid("objet différent d'un interrupteur".into())),
             },
-            Operation::Create { .. } => unreachable!(),
+            Operation::Create { .. }
+            | Operation::PutTechnology { .. }
+            | Operation::RemoveTechnology { .. } => unreachable!(),
         }
     }
     network.validate()

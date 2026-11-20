@@ -137,8 +137,10 @@ paramétrer ; leurs caractéristiques ne doivent pas être déduites du nom seul
 - Un projet autonome exporté inclut ses types ou leurs paramètres résolus.
   L'absence d'une base de catalogue externe ne doit pas empêcher sa relecture.
 
-Le catalogue est prévu au scope V1 ; il n'est pas encore implémenté. Les valeurs
-provisoires de la toolbox ne constituent pas ce catalogue.
+Le socle du catalogue est implémenté en V0.20 : révisions immuables embarquées,
+import/export, instanciation explicite et variantes locales. Les types livrés
+avec le prototype sont pédagogiques ; les matrices par conducteur, conditions
+thermiques et données métier validées restent à compléter.
 
 ### Répartition de puissance
 
@@ -432,7 +434,7 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | D bis — Exploitation et protection inter-départs (V2) | Départs par demi-rame, reprises automatiques, Icctri G, Iccbi G et réglage du départ producteur | Détecter les départs radiaux issus des transformateurs du poste source et leurs départs secourants ; calculer automatiquement chaque configuration de reprise, puis les défauts inter-départs et contributions des producteurs |
 | E — Application V1 | Cas d'étude, résultats, enveloppes et exports | Scénarios P/Q, états d'exploitation et hypothèses de source éditables, échangeables et persistés ; vérification globale, contraintes Icc et scénarios dimensionnants disponibles ; persistance des résultats à intégrer |
 | E aéro — Interrupteurs aériens HTA | Organes de coupure géographiques externes | Réalisé en V0.19 : placement HTA, catégorie persistée, symbole ouvert/fermé, état versionné, calculs et diagnostic topologique ; aucun objet interne de poste anticipé |
-| E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Choix de plusieurs types, variantes explicites et reconstruction d'une ancienne étude après évolution du catalogue |
+| E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Socle réalisé en V0.20 : révisions embarquées immuables, import/export, types ligne/transformateur, paramètres résolus et variantes locales ; données métier détaillées à compléter |
 | E ter — Vues réseau et mondes internes | Carte externe, unifilaire global dérivé et unifilaires locaux des postes | Navigation sans ambiguïté, rattachements et bornes persistés, interrupteurs internes aux postes et aucune divergence silencieuse entre géographie externe et contenu interne |
 | F — Ergonomie, langues et livraison | Édition géographique affinée, français/anglais et distributions | Parcours métier testés avec des utilisateurs cibles dans les deux langues ; corrections d'ergonomie et essais natifs Windows/Linux |
 
@@ -450,9 +452,9 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 4. **E aéro réalisé en V0.19 — interrupteurs aériens HTA** : placement
    géographique, raccordements, symbolisation, état versionné et calculs sont intégrés,
    sans modéliser prématurément les interrupteurs internes aux postes.
-5. **Réaliser E bis — catalogue technologique** : types versionnés de câbles,
-   lignes et transformateurs, instanciation explicite, variantes locales et
-   mise à jour contrôlée sans modifier les études historiques.
+5. **E bis réalisé en V0.20 — catalogue technologique** : types versionnés de
+   lignes et transformateurs, instanciation, variantes locales et historique
+   sont intégrés ; compléter avec les caractéristiques métier validées.
 6. **Compléter E — études et restitutions** : vérification exhaustive des scénarios,
    persistance des résultats, exports CSV et rapport.
 7. **Réaliser E ter — mondes internes** : ajouter le modèle de conteneur, ses

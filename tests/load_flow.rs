@@ -45,6 +45,7 @@ fn feeder(p: f64, q: f64, r: f64, x: f64) -> (Network, Uuid, Uuid, Uuid) {
             name: "Référence analytique".into(),
             frequency_hz: 50.0,
             coordinate_reference: CoordinateReference::LocalMeters,
+            technologies: BTreeMap::new(),
             objects: [source_bus, load_bus, source, line, load]
                 .into_iter()
                 .map(|o| (o.id, o))

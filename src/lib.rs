@@ -1,3 +1,4 @@
+pub mod catalog;
 mod complex;
 pub mod editor;
 pub mod electrical;

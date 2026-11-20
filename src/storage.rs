@@ -175,7 +175,7 @@ fn save_project_transaction(
         )
         .optional()?;
     if let Some((schema, root_version, root)) = stored {
-        if ![1, 2, 3, SCHEMA_VERSION].contains(&schema)
+        if ![1, 2, 3, 4, SCHEMA_VERSION].contains(&schema)
             || root_version != project.root_version.to_string()
             || serde_json::from_str::<crate::model::Network>(&root)? != project.root
         {

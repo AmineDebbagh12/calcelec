@@ -220,6 +220,13 @@ pub fn deletion(network: &Network, id: Id, include_dependents: bool) -> Result<V
 
 fn difference(from: &Network, to: &Network) -> Vec<Operation> {
     let mut operations = vec![];
+    for (id, technology) in &to.technologies {
+        if !from.technologies.contains_key(id) {
+            operations.push(Operation::PutTechnology {
+                technology: technology.clone(),
+            });
+        }
+    }
     for (id, target) in &to.objects {
         if let Some(source) = from.objects.get(id) {
             if source.name != target.name {
@@ -246,6 +253,12 @@ fn difference(from: &Network, to: &Network) -> Vec<Operation> {
                     electrical: target.electrical.clone(),
                 });
             }
+            if source.technology != target.technology {
+                operations.push(Operation::SetTechnology {
+                    id: *id,
+                    technology: target.technology.clone(),
+                });
+            }
             if source.geometry != target.geometry {
                 operations.push(Operation::SetGeometry {
                     id: *id,
@@ -264,6 +277,13 @@ fn difference(from: &Network, to: &Network) -> Vec<Operation> {
         .filter(|id| !to.objects.contains_key(id))
     {
         operations.push(Operation::Delete { id: *id });
+    }
+    for id in from
+        .technologies
+        .keys()
+        .filter(|id| !to.technologies.contains_key(id))
+    {
+        operations.push(Operation::RemoveTechnology { id: *id });
     }
     operations
 }

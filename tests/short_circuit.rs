@@ -44,6 +44,7 @@ fn source_only() -> Network {
         name: "Source analytique".into(),
         frequency_hz: 50.0,
         coordinate_reference: Default::default(),
+        technologies: BTreeMap::new(),
         objects: BTreeMap::from([(bus.id, bus), (source.id, source)]),
     }
 }

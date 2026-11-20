@@ -1,4 +1,4 @@
-# Contrat de données — prototype, schéma 4
+# Contrat de données — prototype, schéma 5
 
 Ce document décrit l'implémentation actuelle. Le cadrage fonctionnel reste la
 cible ; tous ses modèles et mécanismes ne sont pas encore réalisés.
@@ -9,7 +9,7 @@ Un projet JSON contient :
 
 | Champ | Sens |
 | --- | --- |
-| `schema_version` | Version du format, actuellement `4` |
+| `schema_version` | Version du format, actuellement `5` |
 | `id` | UUID stable du projet |
 | `root_version` | UUID de la version initiale |
 | `root` | Réseau initial, incluant tous les paramètres disponibles |
@@ -25,6 +25,13 @@ Le réseau contient `name`, `frequency_hz`, `coordinate_reference` et une table 
 UUID. Chaque objet porte le même `id`, un `name`, un état `in_service` et un
 `equipment` dont le champ `type` précise le modèle : `bus`, `source`, `line`,
 `transformer`, `load`, `generator` ou `switch`.
+
+Le schéma 5 ajoute au réseau la table optionnelle `technologies`. Chaque entrée
+est une révision immuable avec `id`, `family_id`, `revision`, `designation`,
+`provenance`, `domain`, des paramètres typés et éventuellement un modèle
+électrique détaillé. Un ouvrage peut porter `technology` avec l'identifiant de
+révision et `locally_modified`. Les paramètres résolus restent toujours dans
+`equipment` et `electrical`, ce qui rend le projet autonome.
 
 Chaque objet porte également un champ `geometry`. Les coordonnées sont des
 couples `[x, y]` en mètres, X vers l'est et Y vers le nord. Le référentiel commun
@@ -75,7 +82,7 @@ Exemple illustratif, avec identifiants à remplacer par ceux du projet concerné
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "project_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   "base_version": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -106,6 +113,9 @@ Opérations disponibles :
 | `set_geometry` | `id`, `geometry` : nouveau point ou nouveau tracé complet |
 | `set_equipment` | `id`, `equipment` : paramètres électriques et bornes, à type d'équipement inchangé |
 | `set_electrical` | `id`, `electrical` : modèle détaillé typé, ou `null` pour le retirer |
+| `put_technology` | `technology` : ajoute une nouvelle révision immuable au catalogue embarqué |
+| `remove_technology` | `id` : retire une révision inutilisée ; refus si un ouvrage la référence |
+| `set_technology` | `id`, `technology` : rattache explicitement un ouvrage à une révision ou retire le rattachement |
 
 Le champ optionnel `electrical` conserve conducteurs, matrices, enroulements,
 prises, mises à la terre et paramètres de défaut. Son absence signifie que ces
@@ -150,10 +160,10 @@ peuvent pas remplacer silencieusement leurs historiques. Une base plus récente
 ou une branche divergente provoque un conflit. L'interface peut lister et
 recharger les projets présents dans une base existante.
 
-## Migration depuis les schémas 1, 2 et 3
+## Migration depuis les schémas 1, 2, 3 et 4
 
-Les projets JSON de schémas 1, 2 et 3 et leurs lots sont convertis explicitement vers
-le schéma 4 à la lecture. Les identifiants d'objets, projets, lots et versions
+Les projets JSON de schémas 1 à 4 et leurs lots sont convertis explicitement vers
+le schéma 5 à la lecture. Les identifiants d'objets, projets, lots et versions
 restent inchangés. Les anciennes données sans coordonnées deviennent
 `unlocated`, dans un repère `local_meters`. Aucune localisation n'est inventée.
 Un ancien lot de schéma 1 reste importable, avec les mêmes règles de conflit
@@ -163,10 +173,14 @@ un lot de schéma 3 au minimum ; un lot de schéma 1 ou 2 contenant cette opéra
 Le schéma 4 ajoute `electrical` et `set_electrical`. Aucun modèle détaillé n'est
 inventé lors de la migration. Ces champs ou opérations sont refusés dans les
 racines et lots portant une ancienne version de schéma.
+Le schéma 5 ajoute le catalogue et les rattachements de technologie. Aucun type
+n'est inventé pour un ancien projet : son catalogue reste vide jusqu'à un import
+explicite. Les opérations technologiques sont refusées dans un lot antérieur au
+schéma 5.
 
 Les anciennes bases SQLite restent lisibles. Leur représentation est migrée
 dans la transaction lors de l'enregistrement d'un projet migré, après contrôle
-de son historique. Les exports suivants sont au schéma 4 et nécessitent cette
+de son historique. Les exports suivants sont au schéma 5 et nécessitent cette
 version de l'application ; les anciennes versions de l'application ne peuvent
 pas les ouvrir. Les autres versions de schéma restent refusées.
 
@@ -175,7 +189,7 @@ pas les ouvrir. Les autres versions de schéma restent refusées.
 Un premier export de résultats de régime permanent existe séparément du projet.
 Il inclut les identifiants du projet et de sa version, la version du moteur,
 les options, les hypothèses et les grandeurs calculées. Il ne modifie pas le
-schéma 4 du réseau et n'est pas encore persisté dans SQLite. Voir le
+schéma 5 du réseau et n'est pas encore persisté dans SQLite. Voir le
 [contrat du moteur équilibré](calcul-regime-permanent.md).
 Le résultat du [moteur déséquilibré](calcul-desequilibre.md) utilise la même
 traçabilité avec ses propres options et son `solver_version`. Il exporte des
@@ -202,12 +216,12 @@ Le champ historique `currents_a` conserve le courant côté aval. Les lecteurs d
 résultats doivent tenir compte de la version du moteur : le type 0.3 et les
 suivants exigent les nouveaux champs, sans valeur inventée à la lecture d'un
 ancien rapport. Le schéma
-de réseau reste inchangé en version 4 ; les anciennes déclarations de terres,
+de réseau reste inchangé en version 5 ; les anciennes déclarations de terres,
 auparavant refusées au calcul, sont maintenant exploitées dans le domaine pris
 en charge.
 
 Les scénarios de charge et production sont des documents d'étude séparés du
-schéma 4. Leur identifiant, leur type, deux coefficients globaux et leurs rares
+schéma 5. Leur identifiant, leur type, deux coefficients globaux et leurs rares
 exceptions P/Q/état forment un format compact. La table `equipment`, absente
 des anciens fichiers, ajoute des modifications clairsemées `in_service` et
 `tap_position`, indexées par UUID d'ouvrage. Une surcharge
@@ -232,7 +246,7 @@ optionnel et contrôles de seuil. Un contrôle résiduel distingue explicitement
 
 - Pas encore d'empreinte cryptographique, de signature ou d'authentification :
   les UUID identifient les versions mais ne certifient pas leur contenu.
-- Les migrations futures devront être explicites, comme les migrations 1/2/3 → 4.
+- Les migrations futures devront être explicites, comme les migrations 1/2/3/4 → 5.
 - Historique linéaire par document/projet stocké ; pas encore de graphe de
   branches persistant, de fusion, d'export d'une plage de lots ni de points de reprise.
 - Pas de serveur partagé ; le contrat de données est indépendant de SQLite,

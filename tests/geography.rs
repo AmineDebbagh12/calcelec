@@ -13,6 +13,10 @@ fn legacy_json(project: &Project) -> String {
         .as_object_mut()
         .unwrap()
         .remove("coordinate_reference");
+    value["root"]
+        .as_object_mut()
+        .unwrap()
+        .remove("technologies");
     for object in value["root"]["objects"]
         .as_object_mut()
         .unwrap()

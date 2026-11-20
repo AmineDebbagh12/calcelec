@@ -1,0 +1,35 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000002001",
+    "family_id": "00000000-0000-0000-0000-000000002101",
+    "revision": 1,
+    "designation": "95AL — démonstration",
+    "provenance": "Valeurs synthétiques de démonstration — non Enedis",
+    "domain": "Démonstration HTA/BT, caractéristiques à valider avant toute étude",
+    "data": {
+      "kind": "line",
+      "construction": "underground",
+      "conductor_material": "Aluminium",
+      "section_mm2": 95.0,
+      "r_ohm_per_km": 0.32,
+      "x_ohm_per_km": 0.08,
+      "max_current_a": 200.0
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000002005",
+    "family_id": "00000000-0000-0000-0000-000000002105",
+    "revision": 1,
+    "designation": "Transformateur HTA/BT 250 kVA — démonstration",
+    "provenance": "Valeurs synthétiques de démonstration — non Enedis",
+    "domain": "20 kV / 400 V, paramétrage pédagogique",
+    "data": {
+      "kind": "transformer",
+      "primary_voltage_v": 20000.0,
+      "secondary_voltage_v": 400.0,
+      "rated_va": 250000.0,
+      "uk_percent": 4.0,
+      "vector_group": "Dyn11"
+    }
+  }
+]
