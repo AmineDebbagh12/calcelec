@@ -432,7 +432,7 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 | C — Distribution déséquilibrée | Phases, neutre et transformateurs | ABCN radial et faiblement maillé, terres multi-zones, neutre source impédant, groupes Dyn/Yzn et cas rural détaillé disponibles ; comparaison pandapower disponible sur le sous-domaine commun, neutre/terre externe et mailles générales à compléter |
 | D — Courts-circuits | Méthode et modèles du périmètre retenu | Première version radiale IccBmin/3I0 et marges intégrée au verdict global ; shunts homopolaires, cas IEC complets, contributions et mailles à ajouter |
 | D bis — Exploitation et protection inter-départs (V2) | Départs par demi-rame, reprises automatiques, Icctri G, Iccbi G et réglage du départ producteur | Détecter les départs radiaux issus des transformateurs du poste source et leurs départs secourants ; calculer automatiquement chaque configuration de reprise, puis les défauts inter-départs et contributions des producteurs |
-| E — Application V1 | Cas d'étude, résultats, enveloppes et exports | Scénarios P/Q, états d'exploitation et hypothèses de source éditables, échangeables et persistés ; vérification globale, contraintes Icc et scénarios dimensionnants disponibles ; persistance des résultats à intégrer |
+| E — Application V1 | Cas d'étude, résultats, enveloppes et exports | Scénarios, vérification globale et contraintes Icc disponibles ; V0.21 ajoute l'archivage SQLite versionné, le CSV de contraintes et le rapport Markdown ; modèles de rapport et cas d'étude structurés à compléter |
 | E aéro — Interrupteurs aériens HTA | Organes de coupure géographiques externes | Réalisé en V0.19 : placement HTA, catégorie persistée, symbole ouvert/fermé, état versionné, calculs et diagnostic topologique ; aucun objet interne de poste anticipé |
 | E bis — Technologies | Catalogue versionné et instanciation des ouvrages | Socle réalisé en V0.20 : révisions embarquées immuables, import/export, types ligne/transformateur, paramètres résolus et variantes locales ; données métier détaillées à compléter |
 | E ter — Vues réseau et mondes internes | Carte externe, unifilaire global dérivé et unifilaires locaux des postes | Navigation sans ambiguïté, rattachements et bornes persistés, interrupteurs internes aux postes et aucune divergence silencieuse entre géographie externe et contenu interne |
@@ -455,8 +455,8 @@ périmètre d'un futur jalon ; elles ne sont pas encore représentées dans le f
 5. **E bis réalisé en V0.20 — catalogue technologique** : types versionnés de
    lignes et transformateurs, instanciation, variantes locales et historique
    sont intégrés ; compléter avec les caractéristiques métier validées.
-6. **Compléter E — études et restitutions** : vérification exhaustive des scénarios,
-   persistance des résultats, exports CSV et rapport.
+6. **E restitutions engagé en V0.21** : archivage versionné, CSV et premier
+   rapport Markdown sont disponibles ; compléter les cas d'étude et modèles de rapport.
 7. **Réaliser E ter — mondes internes** : ajouter le modèle de conteneur, ses
    bornes et ses interrupteurs, puis la navigation carte → poste → unifilaire
    interne et le retour synchronisé vers la carte, selon l'inspiration

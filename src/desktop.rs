@@ -6,6 +6,7 @@ use calcelec::{
     electrical::Impedance,
     model::{Equipment, Id, Network, Result, rural_example},
     project::{ChangeSet, Operation, Project},
+    reporting::{StoredResult, StudyKind},
     scenario::{
         EquipmentOverride, InjectionOverride, Scenario, ScenarioCollection, ScenarioKind,
         SourceOverride,
@@ -184,6 +185,10 @@ pub struct Desktop {
     catalog_path: String,
     results_view: bool,
     result_path: String,
+    csv_path: String,
+    report_path: String,
+    study_name: String,
+    stored_results: Vec<StoredResult>,
     history: EditHistory,
     tool: MapMode,
     placement: Placement,
@@ -238,6 +243,10 @@ impl Desktop {
             catalog_path: "catalogue.calcelec.json".into(),
             results_view: false,
             result_path: "resultats.calcelec.json".into(),
+            csv_path: "contraintes.csv".into(),
+            report_path: "rapport-etude.md".into(),
+            study_name: "Étude réseau".into(),
+            stored_results: vec![],
             history: EditHistory::default(),
             tool: MapMode::Select,
             placement: Placement::Station,
@@ -1604,7 +1613,151 @@ impl Desktop {
             self.select(id);
         }
     }
+    fn current_stored_result(&self) -> Result<StoredResult> {
+        if let Some(report) = &self.screening_report {
+            return StoredResult::new(
+                &self.study_name,
+                report.project_id,
+                report.network_version,
+                StudyKind::ScenarioScreening,
+                &report.solver_version,
+                report,
+            );
+        }
+        if let Some(study) = &self.unbalanced_study {
+            let payload = match &self.result_scenario {
+                Some(scenario) => serde_json::to_value(calcelec::scenario::ScenarioStudy {
+                    project_id: study.project_id,
+                    network_version: study.network_version,
+                    scenario: scenario.clone(),
+                    solver_version: study.solver_version.clone(),
+                    options: &study.options,
+                    result: &study.result,
+                })?,
+                None => serde_json::to_value(study)?,
+            };
+            return StoredResult::new(
+                &self.study_name,
+                study.project_id,
+                study.network_version,
+                StudyKind::UnbalancedLoadFlow,
+                &study.solver_version,
+                &payload,
+            );
+        }
+        if let Some(study) = &self.study {
+            let payload = match &self.result_scenario {
+                Some(scenario) => serde_json::to_value(calcelec::scenario::ScenarioStudy {
+                    project_id: study.project_id,
+                    network_version: study.network_version,
+                    scenario: scenario.clone(),
+                    solver_version: study.solver_version.clone(),
+                    options: &study.options,
+                    result: &study.result,
+                })?,
+                None => serde_json::to_value(study)?,
+            };
+            return StoredResult::new(
+                &self.study_name,
+                study.project_id,
+                study.network_version,
+                StudyKind::BalancedLoadFlow,
+                &study.solver_version,
+                &payload,
+            );
+        }
+        Err(calcelec::model::Error::Invalid(
+            "aucun résultat courant à enregistrer".into(),
+        ))
+    }
+
+    fn result_persistence(&mut self, ui: &mut egui::Ui) {
+        self.stored_results
+            .retain(|result| result.project_id == self.project.id);
+        ui.collapsing("Résultats enregistrés", |ui| {
+            ui.label("Nom de l'étude");
+            ui.text_edit_singleline(&mut self.study_name);
+            ui.horizontal(|ui| {
+                if ui.button("Enregistrer le résultat en base").clicked() {
+                    let result = (|| -> Result<String> {
+                        let stored = self.current_stored_result()?;
+                        let mut database = Store::open(&self.database_path)?;
+                        database.save_workspace(&self.project, &self.scenarios)?;
+                        let inserted = database.save_result(&self.project, &stored)?;
+                        self.stored_results = database.load_results(&self.project)?;
+                        Ok(if inserted {
+                            "Résultat enregistré avec sa version de réseau."
+                        } else {
+                            "Résultat déjà enregistré à l'identique."
+                        }
+                        .into())
+                    })();
+                    self.report(result);
+                }
+                if ui.button("Relire la liste").clicked() {
+                    let result = Store::open(&self.database_path)
+                        .and_then(|database| database.load_results(&self.project))
+                        .map(|results| {
+                            let count = results.len();
+                            self.stored_results = results;
+                            format!("{count} résultat(s) enregistré(s).")
+                        });
+                    self.report(result);
+                }
+            });
+            let mut restore = None;
+            let mut export = None;
+            for result in &self.stored_results {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!(
+                        "{} · {:?} · réseau {}",
+                        result.name, result.kind, result.network_version
+                    ));
+                    if result.kind == StudyKind::ScenarioScreening
+                        && result.network_version == self.project.head()
+                        && ui.button("Afficher").clicked()
+                    {
+                        restore = Some(result.clone());
+                    }
+                    if ui.button("Exporter l'enveloppe").clicked() {
+                        export = Some(result.clone());
+                    }
+                });
+            }
+            if let Some(result) = restore {
+                let loaded = result.decode::<ScreeningReport>().and_then(|report| {
+                    if report.project_id != result.project_id
+                        || report.network_version != result.network_version
+                    {
+                        return Err(calcelec::model::Error::Invalid(
+                            "traçabilité interne du rapport incohérente".into(),
+                        ));
+                    }
+                    self.study = None;
+                    self.unbalanced_study = None;
+                    self.screening_report = Some(report);
+                    Ok("Rapport enregistré restauré dans la vue résultats.".into())
+                });
+                self.report(loaded);
+            }
+            if let Some(result) = export {
+                let exported = serde_json::to_string_pretty(&result)
+                    .map_err(Into::into)
+                    .and_then(|json| storage::export_new(&self.result_path, &json))
+                    .map(|_| "Enveloppe de résultat exportée.".into());
+                self.report(exported);
+            }
+            ui.small("Les résultats restent liés à leur version exacte. Seul un rapport multi-situations de la version courante peut être rouvert dans l'interface ; les autres restent exportables.");
+        });
+    }
+
     fn results_table(&mut self, ui: &mut egui::Ui) {
+        if self.screening_report.is_some()
+            || self.unbalanced_study.is_some()
+            || self.study.is_some()
+        {
+            self.result_persistence(ui);
+        }
         if self.screening_report.is_some() {
             self.screening_results_table(ui);
             return;
@@ -1790,6 +1943,24 @@ impl Desktop {
                     Ok(()) => "Rapport multi-situations exporté avec sa traçabilité.".into(),
                     Err(error) => error.to_string(),
                 };
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(&mut self.csv_path);
+            if ui.button("Exporter les contraintes CSV").clicked() {
+                let content = calcelec::reporting::screening_csv(&report, &self.network);
+                let result = storage::export_new(&self.csv_path, &content)
+                    .map(|_| "Contraintes et situations dimensionnantes exportées en CSV.".into());
+                self.report(result);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(&mut self.report_path);
+            if ui.button("Exporter le rapport Markdown").clicked() {
+                let content = calcelec::reporting::screening_markdown(&report, &self.network);
+                let result = storage::export_new(&self.report_path, &content)
+                    .map(|_| "Rapport synthétique Markdown exporté.".into());
+                self.report(result);
             }
         });
 

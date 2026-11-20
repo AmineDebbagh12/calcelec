@@ -1,6 +1,7 @@
 use crate::{
     model::{Error, Id, Result},
     project::{ChangeSet, Project, SCHEMA_VERSION},
+    reporting::StoredResult,
     scenario::{Scenario, ScenarioCollection},
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -57,7 +58,12 @@ impl Store {
                 PRIMARY KEY(project_id, position), UNIQUE(project_id, id));
             CREATE TABLE IF NOT EXISTS scenario_collections (
                 project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-                network_version TEXT NOT NULL, json TEXT NOT NULL);",
+                network_version TEXT NOT NULL, json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS study_results (
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                id TEXT NOT NULL, network_version TEXT NOT NULL,
+                kind TEXT NOT NULL, name TEXT NOT NULL, json TEXT NOT NULL,
+                PRIMARY KEY(project_id,id));",
         )?;
         Ok(Self { connection })
     }
@@ -160,6 +166,63 @@ impl Store {
             ));
         }
         Ok(ScenarioCollection::from_json(project, &json)?.scenarios)
+    }
+
+    /// Persist an immutable result envelope. Re-saving identical content is idempotent.
+    pub fn save_result(&mut self, project: &Project, result: &StoredResult) -> Result<bool> {
+        project.network()?;
+        result.validate_for(project)?;
+        let json = serde_json::to_string(result)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let existing: Option<String> = transaction
+            .query_row(
+                "SELECT json FROM study_results WHERE project_id=?1 AND id=?2",
+                [project.id.to_string(), result.id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            let same = existing == json;
+            transaction.commit()?;
+            return if same {
+                Ok(false)
+            } else {
+                Err(Error::Conflict(
+                    "identifiant de résultat réutilisé avec un autre contenu".into(),
+                ))
+            };
+        }
+        transaction.execute(
+            "INSERT INTO study_results(project_id,id,network_version,kind,name,json)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                project.id.to_string(),
+                result.id.to_string(),
+                result.network_version.to_string(),
+                format!("{:?}", result.kind),
+                result.name,
+                json
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    pub fn load_results(&self, project: &Project) -> Result<Vec<StoredResult>> {
+        project.network()?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT json FROM study_results WHERE project_id=?1 ORDER BY rowid")?;
+        let rows = statement.query_map([project.id.to_string()], |row| row.get::<_, String>(0))?;
+        let mut results = vec![];
+        for json in rows {
+            let result: StoredResult = serde_json::from_str(&json?)?;
+            result.validate_for(project)?;
+            results.push(result);
+        }
+        Ok(results)
     }
 }
 

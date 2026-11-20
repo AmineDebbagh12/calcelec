@@ -160,6 +160,13 @@ peuvent pas remplacer silencieusement leurs historiques. Une base plus récente
 ou une branche divergente provoque un conflit. L'interface peut lister et
 recharger les projets présents dans une base existante.
 
+La table `study_results` ajoutée en V0.21 conserve des enveloppes de résultats
+immuables. Chacune porte un UUID, un nom, le projet, la version exacte du réseau,
+le type d'étude, la version du moteur et le JSON complet. Une sauvegarde identique
+est idempotente ; réutiliser le même UUID avec un autre contenu est un conflit.
+Les résultats d'anciennes versions restent archivés mais ne sont pas présentés
+comme résultats du réseau courant.
+
 ## Migration depuis les schémas 1, 2, 3 et 4
 
 Les projets JSON de schémas 1 à 4 et leurs lots sont convertis explicitement vers

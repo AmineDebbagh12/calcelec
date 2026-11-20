@@ -8,7 +8,7 @@ HTA/BT, avec la France et Enedis comme référence métier.
 les réseaux radiaux ou faiblement maillés et les transformateurs Dyn/Yzn HTA/BT.
 Un premier moteur radial de court-circuit publie IccBmin, 3I0 et les marges de
 protection ; son périmètre IEC 60909 reste à étendre.**
-La version de développement courante est **V0.20**.
+La version de développement courante est **V0.21**.
 Le périmètre de la V1 reste décrit dans le [cadrage](docs/cadrage-fonctionnel.md).
 
 ## Lancer l'application
@@ -99,6 +99,15 @@ sont exclusivement pédagogiques et ne constituent pas des données Enedis.
 Le [contrat et le parcours du catalogue](docs/catalogue-technologique.md) sont
 documentés séparément ; un fichier d'import minimal est fourni dans
 `examples/catalog-technologies-demo.json`.
+
+En V0.21, les résultats équilibrés, déséquilibrés et les rapports de vérification
+peuvent être enregistrés dans SQLite sous une enveloppe immuable liée à la
+version exacte du réseau. Le panneau **Résultats enregistrés** permet de nommer
+l'étude, de la sauvegarder, de relire la liste et de réafficher un screening de
+la version courante. La vérification multi-situations produit aussi un CSV des
+contraintes et un rapport synthétique Markdown, en complément du JSON complet.
+Le [contrat de persistance et de restitution](docs/resultats-et-rapports.md)
+précise les garanties et les limites du jalon.
 
 Le bouton **Vérifier toutes les situations** calcule toute la collection (et,
 au choix, le réseau de base). Il ne compare pas les scénarios deux à deux : il
@@ -343,8 +352,9 @@ projection du neutre métallique vers le modèle de retour de terre pandapower.
   interrupteurs et postes, puis ouverture d'un monde interne unifilaire pour les
   objets techniques d'un poste, sans géométrie globale indépendante. Les
   interrupteurs internes aux postes seront ajoutés dans ce monde local.
-- Ajouter cas d'étude, annuler/rétablir, persistance des résultats, rapports et
-  conditionnement compressé des échanges.
+- Ajouter la gestion structurée des cas d'étude, les modèles de rapport et le
+  conditionnement compressé des échanges ; la persistance et les premiers
+  exports sont disponibles depuis la V0.21.
 - Consacrer une phase aux parcours et à l'ergonomie de l'éditeur géographique.
 - Proposer le français et l'anglais, avec choix de langue mémorisé, traduction
   de l'interface, des diagnostics et des rapports ; le prototype reste actuellement en français.

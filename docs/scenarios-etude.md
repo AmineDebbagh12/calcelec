@@ -132,6 +132,8 @@ chaque scénario modifiant l'état de service, une prise ou les hypothèses de s
 est en revanche recalculé séparément pour le défaut. Un critère 3I0 demandé mais non
 calculable rend le verdict global incomplet, jamais conforme.
 
-Les prochains ajouts porteront sur la persistance des rapports et les exports.
-La fusion concurrente de deux collections modifiées séparément reste également
-à définir.
+Depuis la V0.21, un rapport peut être archivé dans SQLite avec son projet, sa
+version de réseau, son moteur et son contenu JSON complet. Les contraintes et
+situations dimensionnantes sont exportables en CSV, et un rapport Markdown
+synthétise verdict, hypothèses, situations et protections. La fusion concurrente
+de deux collections modifiées séparément reste à définir.
